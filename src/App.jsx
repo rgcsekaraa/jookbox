@@ -132,7 +132,7 @@ const VolumeIcon = (props) => (
 );
 
 const SpeedIcon = (props) => (
-  <span class="inline-flex h-5 min-w-7 items-center justify-center rounded-full border border-current px-1 font-mono text-[9px] uppercase leading-none">
+  <span class="inline-flex h-5 min-w-[2.1rem] items-center justify-center rounded-full border border-current px-1 font-mono text-[9px] uppercase leading-none">
     {formatPlaybackSpeed(props.speed)}
   </span>
 );
@@ -509,6 +509,7 @@ function App() {
       null
     );
   });
+  const selectedActiveSong = createMemo(() => activeSongList().find((song) => song.id === selectedId()) || null);
   const selectedIndex = createMemo(() => activeSongList().findIndex((song) => song.id === selectedId()));
   const favoriteIdSet = createMemo(() => new Set(favoriteIds()));
   const loadingDots = createMemo(() => ".".repeat((loadingFrame() % 3) + 1));
@@ -575,7 +576,7 @@ function App() {
     const requestedMainTab = ["library", "recents", "favorites", "radio", "admin"].includes(next.mainTab) ? next.mainTab : defaults.mainTab;
     const nextMainTab = requestedMainTab === "radio" ? defaults.mainTab : requestedMainTab;
     const nextRepeatMode = ["off", "one", "album", "random"].includes(next.repeatMode) ? next.repeatMode : defaults.repeatMode;
-    const nextRecentSongIds = Array.isArray(next.recentSongIds) ? next.recentSongIds.filter((id) => typeof id === "string" && id).slice(0, 80) : [];
+    const nextRecentSongIds = Array.isArray(next.recentSongIds) ? next.recentSongIds.filter((id) => typeof id === "string" && id).slice(0, 20) : [];
     const nextPlayerVolume = Number.isFinite(Number(next.playerVolume)) ? clampUnit(Number(next.playerVolume)) : defaults.playerVolume;
     const requestedPlaybackSpeed = Number(next.playbackSpeed);
     const nextPlaybackSpeed = PLAYBACK_SPEEDS.includes(requestedPlaybackSpeed) ? requestedPlaybackSpeed : defaults.playbackSpeed;
@@ -612,7 +613,7 @@ function App() {
       ...defaults,
       ...base,
       ...incoming,
-      recentSongIds: [...new Set([...(incoming.recentSongIds || []), ...(base.recentSongIds || [])])].slice(0, 80),
+      recentSongIds: [...new Set([...(incoming.recentSongIds || []), ...(base.recentSongIds || [])])].slice(0, 20),
     };
   };
 
@@ -761,7 +762,7 @@ function App() {
     if (!songId || mainTab() === "radio") {
       return;
     }
-    setRecentIds((current) => [songId, ...current.filter((id) => id !== songId)].slice(0, 80));
+    setRecentIds((current) => [songId, ...current.filter((id) => id !== songId)].slice(0, 20));
   };
 
   const clearRecents = () => {
@@ -930,8 +931,12 @@ function App() {
               setGlobalPlaylistDetail(null);
             }
           }
-          if (!selectedGlobalPlaylistTarget() && playlistsPayload.globalPlaylists?.[0]?.id) {
-            setSelectedGlobalPlaylistTarget(playlistsPayload.globalPlaylists[0].id);
+          if (playlistsPayload.globalPlaylists?.[0]?.id) {
+            const defaultGlobalId = globalPlaylistDetail()?.id || selectedGlobalPlaylistTarget() || playlistsPayload.globalPlaylists[0].id;
+            setSelectedGlobalPlaylistTarget(defaultGlobalId);
+            if (!globalPlaylistDetail()) {
+              void openGlobalPlaylist(defaultGlobalId);
+            }
           }
         } else {
           setGlobalPlaylists([]);
@@ -1012,8 +1017,12 @@ function App() {
         if (!selectedPlaylistTarget() && playlistsPayload.playlists?.[0]?.id) {
           setSelectedPlaylistTarget(playlistsPayload.playlists[0].id);
         }
-        if (!selectedGlobalPlaylistTarget() && playlistsPayload.globalPlaylists?.[0]?.id) {
-          setSelectedGlobalPlaylistTarget(playlistsPayload.globalPlaylists[0].id);
+        if (playlistsPayload.globalPlaylists?.[0]?.id) {
+          const defaultGlobalId = globalPlaylistDetail()?.id || selectedGlobalPlaylistTarget() || playlistsPayload.globalPlaylists[0].id;
+          setSelectedGlobalPlaylistTarget(defaultGlobalId);
+          if (!globalPlaylistDetail()) {
+            void openGlobalPlaylist(defaultGlobalId);
+          }
         }
         if (globalPlaylistDetail()) {
           const detailId = globalPlaylistDetail()?.id;
@@ -1761,6 +1770,8 @@ function App() {
     const nextUrl = new URL(nextRelativeUrl, window.location.origin).href;
     if (activeAudio.src !== nextUrl) {
       stopCrossfade();
+      setCurrentTime(0);
+      setDuration(0);
       setStreamStarted(false);
       inactiveAudio.pause();
       inactiveAudio.src = nextRelativeUrl;
@@ -1789,9 +1800,26 @@ function App() {
             }
             beginCrossfade(activeAudio, inactiveAudio, activeDeckIndex === 0 ? 1 : 0);
             setIsPlaying(true);
+            setStreamStarted(true);
           })
           .catch(() => {
             inactiveAudio.pause();
+            activeAudio.pause();
+            activeAudio.currentTime = 0;
+            activeAudio.src = nextRelativeUrl;
+            activeAudio.preload = "auto";
+            activeAudio.load();
+            syncTimelineFromAudio(activeAudio, true);
+            void activeAudio.play()
+              .then(() => {
+                setIsPlaying(true);
+                setStreamStarted(true);
+                syncTimelineFromAudio(activeAudio, true);
+              })
+              .catch(() => {
+                setIsPlaying(false);
+                setStreamStarted(false);
+              });
           });
       } else if (!isSameSong) {
         promoteDeck(activeDeckIndex === 0 ? 1 : 0);
@@ -1811,14 +1839,15 @@ function App() {
   };
 
   const moveSelection = (offset) => {
-    const nextSong = pickRelativeSong(offset);
+    const nextSong = pickRelativeSong(offset, selectedId(), { respectRandom: false });
     if (!nextSong) {
       return;
     }
     setSelectedId(nextSong.id);
   };
 
-  const pickRelativeSong = (offset, baseId = selectedId()) => {
+  const pickRelativeSong = (offset, baseId = selectedId(), options = {}) => {
+    const { respectRandom = true } = options;
     const list = activeSongList();
     if (!list.length) {
       return null;
@@ -1830,7 +1859,7 @@ function App() {
       return list[nextIndex] || null;
     }
 
-    if (repeatMode() === "random") {
+    if (respectRandom && repeatMode() === "random") {
       const base = list.find((song) => song.id === baseId);
       const pool = list.filter((song) => song.id !== base?.id);
       return pool[Math.floor(Math.random() * pool.length)] || list[0];
@@ -1847,7 +1876,7 @@ function App() {
   };
 
   const selectRelative = (offset, autoplay = false, baseId = selectedId()) => {
-    const nextSong = pickRelativeSong(offset, baseId);
+    const nextSong = pickRelativeSong(offset, baseId, { respectRandom: autoplay });
     if (!nextSong) {
       return;
     }
@@ -1890,15 +1919,19 @@ function App() {
     }
 
     if (!currentSong() && activeSongList()[0]) {
-      loadSong(mainTab() === "radio" ? activeSongList()[0] : (selectedSong() || activeSongList()[0]), true);
+      loadSong(mainTab() === "radio" ? activeSongList()[0] : (selectedActiveSong() || selectedSong() || activeSongList()[0]), true);
       return;
     }
 
     if (activeAudio.paused) {
+      if (selectedActiveSong() && selectedActiveSong()?.id !== currentTrackId()) {
+        loadSong(selectedActiveSong(), true);
+        return;
+      }
       if (!activeAudio.src) {
         const fallbackSong = mainTab() === "radio"
           ? currentSong() || activeSongList()[0]
-          : selectedSong() || currentSong() || activeSongList()[0];
+          : selectedActiveSong() || selectedSong() || currentSong() || activeSongList()[0];
         if (fallbackSong) {
           loadSong(fallbackSong, true);
           return;
@@ -2054,14 +2087,14 @@ function App() {
 
       if (event.key === "Enter") {
         event.preventDefault();
-        loadSong(selectedSong() || activeSongList()[0], true);
+        loadSong(selectedActiveSong() || selectedSong() || activeSongList()[0], true);
         return;
       }
 
       if (event.key === " ") {
         event.preventDefault();
         if (!isPlaying()) {
-          loadSong(selectedSong() || activeSongList()[0], true);
+          loadSong(selectedActiveSong() || selectedSong() || activeSongList()[0], true);
         } else {
           togglePlayback();
         }
@@ -2071,7 +2104,7 @@ function App() {
       if (event.key === "[") {
         event.preventDefault();
         if (!radioPlaybackLocked()) {
-          selectRelative(-1, true, currentTrackId() || selectedId());
+          selectRelative(-1, true, selectedId() || currentTrackId());
         }
         return;
       }
@@ -2079,7 +2112,7 @@ function App() {
       if (event.key === "]") {
         event.preventDefault();
         if (!radioPlaybackLocked()) {
-          selectRelative(1, true, currentTrackId() || selectedId());
+          selectRelative(1, true, selectedId() || currentTrackId());
         }
         return;
       }
@@ -2295,7 +2328,10 @@ function App() {
     const bottomPadding = 12;
 
     if (rowRect.top < listRect.top + topPadding || rowRect.bottom > listRect.bottom - bottomPadding) {
-      row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      const nextScrollTop = rowRect.top < listRect.top + topPadding
+        ? listRef.scrollTop - ((listRect.top + topPadding) - rowRect.top)
+        : listRef.scrollTop + (rowRect.bottom - (listRect.bottom - bottomPadding));
+      animateListScroll(Math.max(0, nextScrollTop));
     }
   });
 
@@ -3283,22 +3319,6 @@ function App() {
                               {playlist().source || "manual"} · {(playlist().tracks || []).length} tracks
                             </div>
                           </div>
-                          <div class="flex items-center gap-3">
-                            <button
-                              type="button"
-                              onClick={closeGlobalPlaylist}
-                              class="shrink-0 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-                            >
-                              All songs
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setGlobalPlaylistDetail(null)}
-                              class="shrink-0 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-                            >
-                              Close
-                            </button>
-                          </div>
                         </div>
                       </section>
                       <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-4 py-2">
@@ -3317,14 +3337,29 @@ function App() {
                           </div>
                         }
                       >
-                        <ul class="min-h-0 flex-1 overflow-y-auto">
+                        <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
                           <For each={playlist().tracks || []}>
-                            {(track, index) => (
+                            {(track, index) => {
+                              const active = () => selectedSong()?.id === track.id;
+                              return (
                               <li>
                                 <button
+                                  ref={(el) => {
+                                    if (el) {
+                                      rowRefs.set(track.id, el);
+                                    } else {
+                                      rowRefs.delete(track.id);
+                                    }
+                                  }}
                                   type="button"
                                   onClick={() => loadSong(track, true)}
-                                  class="flex w-full items-center gap-4 border-b px-4 py-3 text-left transition hover:bg-[var(--hover)]"
+                                  class={`flex w-full items-center gap-4 px-4 py-3 text-left transition ${
+                                    active()
+                                      ? currentTrackId() === track.id
+                                        ? "song-row-active text-[var(--fg)]"
+                                        : "bg-[var(--hover)] text-[var(--fg)]"
+                                      : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
+                                  }`}
                                 >
                                   <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
                                     {currentTrackId() === track.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
@@ -3336,7 +3371,8 @@ function App() {
                                   <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{track.year || "-"}</span>
                                 </button>
                               </li>
-                            )}
+                              );
+                            }}
                           </For>
                         </ul>
                       </Show>
@@ -3432,11 +3468,13 @@ function App() {
                                       }}
                                       type="button"
                                       onClick={() => loadSong(song, true)}
-                                      class={`flex w-full items-center gap-4 border-b px-4 py-3 text-left transition ${
+                                      class={`flex w-full items-center gap-4 px-4 py-3 text-left transition ${
                                         active()
-                                          ? "song-row-active border-transparent text-[var(--fg)]"
-                                          : "border-transparent bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
-                                      } ${active() && keyboardNavigating() ? "bg-[var(--hover)]" : ""}`}
+                                          ? currentTrackId() === song.id
+                                            ? "song-row-active text-[var(--fg)]"
+                                            : "bg-[var(--hover)] text-[var(--fg)]"
+                                          : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
+                                      }`}
                                     >
                                       <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
                                         {currentTrackId() === song.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
@@ -3559,11 +3597,13 @@ function App() {
                               type="button"
                               onClick={() => loadSong(song, true)}
                               title={`Last updated: ${formatUpdatedAt(song.updatedAt)}`}
-                              class={`flex w-full items-center gap-4 border-b px-6 py-3 text-left transition ${
+                              class={`flex w-full items-center gap-4 px-6 py-3 text-left transition ${
                                 active()
-                                  ? "song-row-active border-transparent text-[var(--fg)]"
-                                  : "border-transparent bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
-                              } ${active() && keyboardNavigating() ? "bg-[var(--hover)]" : ""}`}
+                                  ? currentTrackId() === song.id
+                                    ? "song-row-active text-[var(--fg)]"
+                                    : "bg-[var(--hover)] text-[var(--fg)]"
+                                  : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
+                              }`}
                             >
                               <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
                                 {currentTrackId() === song.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
@@ -3715,10 +3755,10 @@ function App() {
             </IconButton>
           </div>
           <div class="flex items-center justify-end gap-2.5">
-            <IconButton onClick={cyclePlaybackSpeed} label={playbackSpeedLabel()}>
+            <IconButton onClick={cyclePlaybackSpeed} label={playbackSpeedLabel()} class="flex h-8 min-w-[2.5rem] items-center justify-center">
               <SpeedIcon speed={playbackSpeed()} />
             </IconButton>
-            <IconButton onClick={() => setMuted((value) => !value)} label={muted() ? "Unmute" : "Mute"}>
+            <IconButton onClick={() => setMuted((value) => !value)} label={muted() ? "Unmute" : "Mute"} class="flex h-8 w-8 items-center justify-center">
               <VolumeIcon muted={muted() || volume() === 0} />
             </IconButton>
             <input

@@ -207,6 +207,9 @@ _GEMINI_KEYS_RAW = os.environ.get("GEMINI_API_KEYS", "") or os.environ.get("GEMI
 GEMINI_API_KEYS = [key.strip() for key in re.split(r"[\n,]+", _GEMINI_KEYS_RAW) if key.strip()]
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_TIMEOUT_SECONDS = max(2, int(os.environ.get("GEMINI_TIMEOUT_SECONDS", "8")))
+DEFAULT_GLOBAL_PLAYLIST_SOURCE = "default"
+DEFAULT_LATEST_2026_SOURCE_URL = "isaibox:default:latest-tamil-hits-2026"
+DEFAULT_LATEST_2026_NAME = "Latest Tamil Hits 2026"
 SESSION_SECRET = os.environ.get("ISAIBOX_SESSION_SECRET", "isaibox-dev-session-secret")
 ADMIN_EMAILS = {
     email.strip().lower()
@@ -1025,6 +1028,29 @@ def create_or_update_global_playlist(
     }
 
 
+def ensure_default_latest_2026_playlist() -> dict | None:
+    with get_read_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT song_id
+            FROM songs
+            WHERE year = '2026' AND url_320kbps IS NOT NULL AND url_320kbps != ''
+            ORDER BY updated_at DESC NULLS LAST, movie_name, track_number
+            LIMIT 50
+            """
+        ).fetchall()
+    song_ids = [row[0] for row in rows if row[0]]
+    if not song_ids:
+        return None
+    return create_or_update_global_playlist(
+        owner_user_id="system",
+        name=DEFAULT_LATEST_2026_NAME,
+        song_ids=song_ids,
+        source=DEFAULT_GLOBAL_PLAYLIST_SOURCE,
+        source_url=DEFAULT_LATEST_2026_SOURCE_URL,
+    )
+
+
 def rename_playlist_for_user(user: dict, playlist_id: str, name: str) -> dict:
     cleaned_name = (name or "").strip()
     if not cleaned_name:
@@ -1407,10 +1433,11 @@ def user_preferences_for_user(user_id: str) -> dict:
         recent_song_ids = json.loads(row[2]) if row[2] else []
     except Exception:
         recent_song_ids = []
+    normalized_recent_song_ids = [song_id for song_id in recent_song_ids if isinstance(song_id, str) and song_id][:20]
     return {
         "themePreference": row[0] or "system",
         "mainTab": row[1] or "library",
-        "recentSongIds": recent_song_ids if isinstance(recent_song_ids, list) else [],
+        "recentSongIds": normalized_recent_song_ids,
         "playerVolume": float(row[3]) if row[3] is not None else 0.9,
         "playerMuted": bool(row[4]),
         "repeatMode": row[5] or "off",
@@ -1437,7 +1464,7 @@ def save_user_preferences(user_id: str, payload: dict) -> dict:
         prefs["mainTab"] = "library"
     if prefs["repeatMode"] not in {"off", "one", "album", "random"}:
         prefs["repeatMode"] = "off"
-    prefs["recentSongIds"] = [song_id for song_id in prefs["recentSongIds"] if isinstance(song_id, str) and song_id][:80]
+    prefs["recentSongIds"] = [song_id for song_id in prefs["recentSongIds"] if isinstance(song_id, str) and song_id][:20]
 
     with db.get_conn() as conn:
         conn.execute(
@@ -1500,6 +1527,7 @@ def playlists_for_user(user_id: str) -> list[dict]:
 
 
 def global_playlists() -> list[dict]:
+    ensure_default_latest_2026_playlist()
     with get_read_conn() as conn:
         rows = conn.execute(
             """
@@ -1508,8 +1536,17 @@ def global_playlists() -> list[dict]:
             LEFT JOIN playlist_songs ps ON ps.playlist_id = p.playlist_id
             WHERE p.is_global = TRUE
             GROUP BY 1,2,3,4,5,6
-            ORDER BY LOWER(p.name) ASC, p.updated_at DESC, p.created_at DESC
+            ORDER BY
+                CASE
+                    WHEN p.source = ? AND p.source_url = ? THEN 0
+                    ELSE 1
+                END,
+                LOWER(p.name) ASC,
+                p.updated_at DESC,
+                p.created_at DESC
             """
+            ,
+            [DEFAULT_GLOBAL_PLAYLIST_SOURCE, DEFAULT_LATEST_2026_SOURCE_URL],
         ).fetchall()
     return [
         {
