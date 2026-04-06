@@ -64,6 +64,35 @@ ISAIBOX_ADMIN_EMAILS=admin@example.com
 
 `ISAIBOX_ADMIN_EMAILS` is a comma-separated allowlist for admin users.
 
+## isaibox backend
+
+The backend now runs as a packaged FastAPI app:
+
+```bash
+source venv/bin/activate
+python app.py
+```
+
+Production-style direct run:
+
+```bash
+source venv/bin/activate
+uvicorn backend.main:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+Relevant env vars:
+
+```bash
+ISAIBOX_HOST=127.0.0.1
+ISAIBOX_PORT=8000
+ISAIBOX_LOG_LEVEL=info
+GEMINI_API_KEYS=comma,separated,keys
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+Radio stations and AI playlists are generated only from songs already stored in DuckDB.
+The radio UI keeps the station loop internal and does not render the station queue as a visible list.
+
 ## Cache strategy
 
 `isaibox` now supports layered backend cache:
