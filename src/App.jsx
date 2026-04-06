@@ -1,5 +1,8 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
+const CROSSFADE_MS = 900;
+const clampUnit = (value) => Math.max(0, Math.min(1, value));
+
 const formatTime = (seconds) => {
   if (!Number.isFinite(seconds) || seconds < 0) {
     return "0:00";
@@ -146,6 +149,44 @@ const SpotifyIcon = () => (
   </svg>
 );
 
+const ThemeIcon = (props) => (
+  <svg viewBox="0 0 24 24" class="h-[14px] w-[14px] fill-none stroke-current stroke-[1.8]">
+    <Show
+      when={props.theme === "dark"}
+      fallback={
+        <>
+          <path d="M12 3v2.5" />
+          <path d="M12 18.5V21" />
+          <path d="M4.9 4.9 6.7 6.7" />
+          <path d="m17.3 17.3 1.8 1.8" />
+          <path d="M3 12h2.5" />
+          <path d="M18.5 12H21" />
+          <path d="m4.9 19.1 1.8-1.8" />
+          <path d="m17.3 6.7 1.8-1.8" />
+          <circle cx="12" cy="12" r="4" />
+        </>
+      }
+    >
+      <path d="M20 14.5A7.5 7.5 0 1 1 9.5 4 6 6 0 0 0 20 14.5Z" />
+    </Show>
+  </svg>
+);
+
+const getInitials = (name, email = "") => {
+  const parts = (name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
+  }
+  if (parts.length === 1 && parts[0]) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  const local = (email || "").split("@")[0].replace(/[^a-z0-9]/gi, "");
+  return (local.slice(0, 2) || "U").toUpperCase();
+};
+
 const base64UrlEncode = (buffer) =>
   btoa(String.fromCharCode(...new Uint8Array(buffer)))
     .replace(/\+/g, "-")
@@ -158,11 +199,53 @@ const createPkceVerifier = () => {
   return base64UrlEncode(bytes);
 };
 
+const shuffleArray = (items) => {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+};
+
+const defaultUserPreferences = () => ({
+  themePreference: "system",
+  mainTab: "library",
+  recentSongIds: [],
+  playerVolume: 0.9,
+  playerMuted: false,
+  repeatMode: "off",
+  autoplayNext: true,
+});
+
+const GUEST_PREFERENCES_KEY = "isaibox-guest-preferences";
+
+const readGuestPreferences = () => {
+  try {
+    const raw = localStorage.getItem(GUEST_PREFERENCES_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeGuestPreferences = (preferences) => {
+  try {
+    localStorage.setItem(GUEST_PREFERENCES_KEY, JSON.stringify(preferences));
+  } catch {}
+};
+
+const clearGuestPreferences = () => {
+  try {
+    localStorage.removeItem(GUEST_PREFERENCES_KEY);
+  } catch {}
+};
+
 function App() {
   const [songs, setSongs] = createSignal([]);
   const [results, setResults] = createSignal({ songs: [], albums: [], artists: [] });
   const [stats, setStats] = createSignal(null);
-  const [query, setQuery] = createSignal(localStorage.getItem("isaibox-query") || "");
+  const [query, setQuery] = createSignal("");
   const [selectedId, setSelectedId] = createSignal("");
   const [currentTrackId, setCurrentTrackId] = createSignal("");
   const [loading, setLoading] = createSignal(true);
@@ -171,17 +254,26 @@ function App() {
   const [isPlaying, setIsPlaying] = createSignal(false);
   const [currentTime, setCurrentTime] = createSignal(0);
   const [duration, setDuration] = createSignal(0);
-  const [volume, setVolume] = createSignal(Number(localStorage.getItem("isaibox-volume") || "0.9"));
-  const [muted, setMuted] = createSignal(localStorage.getItem("isaibox-muted") === "1");
-  const [repeatMode, setRepeatMode] = createSignal(localStorage.getItem("isaibox-repeat-mode") || "off");
+  const [volume, setVolume] = createSignal(0.9);
+  const [muted, setMuted] = createSignal(false);
+  const [repeatMode, setRepeatMode] = createSignal("off");
   const [movieFilter, setMovieFilter] = createSignal("");
   const [artistFilter, setArtistFilter] = createSignal("");
-  const [autoplayNext, setAutoplayNext] = createSignal(localStorage.getItem("isaibox-autoplay-next") !== "0");
-  const [audioSrc, setAudioSrc] = createSignal("");
-  const [theme, setTheme] = createSignal(localStorage.getItem("isaibox-theme") || "dark");
+  const [autoplayNext, setAutoplayNext] = createSignal(true);
+  const [themePreference, setThemePreference] = createSignal("system");
+  const [systemTheme, setSystemTheme] = createSignal("dark");
+  const [mainTab, setMainTab] = createSignal("library");
+  const [recentIds, setRecentIds] = createSignal([]);
+  const [radioQueue, setRadioQueue] = createSignal([]);
+  const [radioStations, setRadioStations] = createSignal([]);
+  const [selectedRadioStationId, setSelectedRadioStationId] = createSignal("");
+  const [radioLoading, setRadioLoading] = createSignal(false);
+  const [radioMessage, setRadioMessage] = createSignal("");
   const [streamStarted, setStreamStarted] = createSignal(false);
   const [keyboardNavigating, setKeyboardNavigating] = createSignal(false);
   const [googleClientId, setGoogleClientId] = createSignal("");
+  const [geminiRadioEnabled, setGeminiRadioEnabled] = createSignal(false);
+  const [geminiKeyCount, setGeminiKeyCount] = createSignal(0);
   const [spotifyClientId, setSpotifyClientId] = createSignal("");
   const [spotifyRedirectUri, setSpotifyRedirectUri] = createSignal("");
   const [spotifyScopes, setSpotifyScopes] = createSignal("");
@@ -202,12 +294,16 @@ function App() {
   const [searchTab, setSearchTab] = createSignal("songs");
   const [globalPlaylistDetail, setGlobalPlaylistDetail] = createSignal(null);
   const [googleReady, setGoogleReady] = createSignal(false);
+  const [googleInitialized, setGoogleInitialized] = createSignal(false);
+  const [preferencesReady, setPreferencesReady] = createSignal(false);
+  const [preferenceStore, setPreferenceStore] = createSignal("pending");
   const [spotifyAuth, setSpotifyAuth] = createSignal(null);
   const [spotifyPlaylists, setSpotifyPlaylists] = createSignal([]);
   const [selectedSpotifyPlaylistId, setSelectedSpotifyPlaylistId] = createSignal("");
 
   let worker;
-  let audioRef;
+  const audioRefs = [];
+  let googleButtonRef;
   let listRef;
   let searchTimeout;
   let removeKeydownListener = null;
@@ -215,6 +311,12 @@ function App() {
   let keyboardNavTimer;
   let scrollAnimationFrame;
   let adminRefreshTimer;
+  let crossfadeFrame;
+  let themeMediaQuery;
+  let syncSystemTheme;
+  let crossfadeToken = 0;
+  let activeDeckIndex = 0;
+  let fadingAudio = null;
   const prefetchedIds = new Set();
   const rowRefs = new Map();
 
@@ -279,15 +381,32 @@ function App() {
   });
   const visibleAlbums = createMemo(() => results().albums || []);
   const visibleArtists = createMemo(() => results().artists || []);
+  const songIndex = createMemo(() => new Map(songs().map((song) => [song.id, song])));
+  const recentSongs = createMemo(() => recentIds().map((id) => songIndex().get(id)).filter(Boolean));
+  const favoriteSongs = createMemo(() => favoriteIds().map((id) => songIndex().get(id)).filter(Boolean));
+  const theme = createMemo(() => (themePreference() === "system" ? systemTheme() : themePreference()));
+  const currentRadioStation = createMemo(() => radioStations().find((station) => station.id === selectedRadioStationId()) || null);
+  const activeSongList = createMemo(() => {
+    if (mainTab() === "recents") {
+      return recentSongs();
+    }
+    if (mainTab() === "favorites") {
+      return favoriteSongs();
+    }
+    if (mainTab() === "radio") {
+      return radioQueue();
+    }
+    return visibleResults();
+  });
   const selectedSong = createMemo(() => {
-    const visible = visibleResults();
+    const visible = activeSongList();
     return visible.find((song) => song.id === selectedId()) || songs().find((song) => song.id === selectedId()) || null;
   });
   const currentSong = createMemo(() => {
     const list = songs();
     return list.find((song) => song.id === currentTrackId()) || null;
   });
-  const selectedIndex = createMemo(() => visibleResults().findIndex((song) => song.id === selectedId()));
+  const selectedIndex = createMemo(() => activeSongList().findIndex((song) => song.id === selectedId()));
   const favoriteIdSet = createMemo(() => new Set(favoriteIds()));
   const formatUpdatedAt = (value) => {
     if (!value) return "Unknown";
@@ -301,16 +420,310 @@ function App() {
     return Boolean(auth?.accessToken && auth?.expiresAt && auth.expiresAt > Date.now());
   });
 
+  const buildRadioQueue = (currentId = "") => {
+    const pool = shuffleArray(songs().filter((song) => song.id !== currentId));
+    const current = currentId ? songIndex().get(currentId) : null;
+    return current ? [current, ...pool] : pool;
+  };
+
+  const applyUserPreferences = (payload = {}) => {
+    const defaults = defaultUserPreferences();
+    const next = {
+      ...defaults,
+      ...(payload || {}),
+    };
+    const nextThemePreference = ["system", "light", "dark"].includes(next.themePreference) ? next.themePreference : defaults.themePreference;
+    const nextMainTab = ["library", "recents", "favorites", "radio"].includes(next.mainTab) ? next.mainTab : defaults.mainTab;
+    const nextRepeatMode = ["off", "one", "album", "random"].includes(next.repeatMode) ? next.repeatMode : defaults.repeatMode;
+    const nextRecentSongIds = Array.isArray(next.recentSongIds) ? next.recentSongIds.filter((id) => typeof id === "string" && id).slice(0, 80) : [];
+    const nextPlayerVolume = Number.isFinite(Number(next.playerVolume)) ? clampUnit(Number(next.playerVolume)) : defaults.playerVolume;
+
+    setThemePreference(nextThemePreference);
+    setMainTab(nextMainTab);
+    setRecentIds(nextRecentSongIds);
+    setVolume(nextPlayerVolume);
+    setMuted(Boolean(next.playerMuted));
+    setRepeatMode(nextRepeatMode);
+    setAutoplayNext(Boolean(next.autoplayNext));
+  };
+
+  const resetUserScopedPreferences = (payload = readGuestPreferences()) => {
+    applyUserPreferences(payload || defaultUserPreferences());
+    setPreferencesReady(true);
+  };
+
+  const collectCurrentPreferences = () => ({
+    themePreference: themePreference(),
+    mainTab: mainTab(),
+    recentSongIds: recentIds(),
+    playerVolume: volume(),
+    playerMuted: muted(),
+    repeatMode: repeatMode(),
+    autoplayNext: autoplayNext(),
+  });
+
+  const mergePreferences = (base = {}, incoming = {}) => {
+    const defaults = defaultUserPreferences();
+    return {
+      ...defaults,
+      ...base,
+      ...incoming,
+      recentSongIds: [...new Set([...(incoming.recentSongIds || []), ...(base.recentSongIds || [])])].slice(0, 80),
+    };
+  };
+
+  const toggleThemePreference = () => {
+    setThemePreference(theme() === "dark" ? "light" : "dark");
+  };
+
+  const applyRadioStation = (stationId, autoplay = false) => {
+    const station = radioStations().find((item) => item.id === stationId) || radioStations()[0];
+    if (!station) {
+      const queue = buildRadioQueue(currentTrackId());
+      setRadioQueue(queue);
+      if (queue[0]) {
+        setSelectedId(queue[0].id);
+        if (autoplay) {
+          loadSong(queue[0], true);
+        }
+      }
+      return;
+    }
+    const queue = (station.songIds || []).map((id) => songIndex().get(id)).filter(Boolean);
+    setSelectedRadioStationId(station.id);
+    setRadioQueue(queue);
+    setMainTab("radio");
+    if (queue[0]) {
+      setSelectedId(queue[0].id);
+      if (autoplay) {
+        loadSong(queue[0], true);
+      }
+    }
+  };
+
+  const fetchRadioStations = async (forceRefresh = false) => {
+    if (!songs().length) {
+      return;
+    }
+    setRadioLoading(true);
+    setRadioMessage("");
+    try {
+      const response = await fetch(`/api/radio/stations${forceRefresh ? "?refresh=1" : ""}`);
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to build radio stations");
+      }
+      const stations = payload.stations || [];
+      setRadioStations(stations);
+      const nextStationId = stations.some((station) => station.id === selectedRadioStationId())
+        ? selectedRadioStationId()
+        : stations[0]?.id || "";
+      setSelectedRadioStationId(nextStationId);
+      setRadioMessage(payload.source === "gemini" ? "" : "Using local fallback station sorter");
+      if (mainTab() === "radio" || !radioQueue().length) {
+        applyRadioStation(nextStationId, false);
+      }
+    } catch (fetchError) {
+      setRadioMessage(fetchError?.message || "Unable to build radio stations");
+      if (!radioQueue().length) {
+        setRadioQueue(buildRadioQueue(currentTrackId()));
+      }
+    } finally {
+      setRadioLoading(false);
+    }
+  };
+
+  const setMainBrowseTab = (tab) => {
+    setMainTab(tab);
+    if (tab === "radio" && !radioQueue().length && songs().length) {
+      if (radioStations().length) {
+        applyRadioStation(selectedRadioStationId() || radioStations()[0]?.id || "", false);
+      } else {
+        const queue = buildRadioQueue(currentTrackId());
+        setRadioQueue(queue);
+        if (!selectedId() && queue[0]) {
+          setSelectedId(queue[0].id);
+        }
+      }
+      return;
+    }
+    const list =
+      tab === "recents" ? recentSongs()
+      : tab === "favorites" ? favoriteSongs()
+      : tab === "library" ? visibleResults()
+      : activeSongList();
+    if (list[0]) {
+      setSelectedId(list[0].id);
+    }
+  };
+
+  const rememberRecentSong = (songId) => {
+    if (!songId) {
+      return;
+    }
+    setRecentIds((current) => [songId, ...current.filter((id) => id !== songId)].slice(0, 80));
+  };
+
+  const clearRecents = () => {
+    setRecentIds([]);
+  };
+
+  const startRadio = () => {
+    applyRadioStation(selectedRadioStationId() || radioStations()[0]?.id || "", true);
+  };
+
+  const getAudio = (index) => audioRefs[index] || null;
+  const getActiveAudio = () => getAudio(activeDeckIndex);
+  const getInactiveAudio = () => getAudio(activeDeckIndex === 0 ? 1 : 0);
+
+  const stopCrossfade = () => {
+    crossfadeToken += 1;
+    cancelAnimationFrame(crossfadeFrame);
+    if (fadingAudio) {
+      fadingAudio.pause();
+      fadingAudio.currentTime = 0;
+      fadingAudio.removeAttribute("src");
+      fadingAudio.load();
+      fadingAudio = null;
+    }
+  };
+
+  const syncDeckVolumes = () => {
+    audioRefs.forEach((audio, index) => {
+      if (!audio) {
+        return;
+      }
+      audio.muted = muted();
+      audio.volume = index === activeDeckIndex ? volume() : 0;
+    });
+  };
+
+  const syncTimelineFromAudio = (audio, resetCurrent = false) => {
+    if (!audio) {
+      if (resetCurrent) {
+        setCurrentTime(0);
+      }
+      setDuration(0);
+      return;
+    }
+    const nextDuration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
+    const nextCurrentTime = Number.isFinite(audio.currentTime) && audio.currentTime >= 0 ? audio.currentTime : 0;
+    setDuration(nextDuration);
+    setCurrentTime(resetCurrent ? 0 : Math.min(nextCurrentTime, nextDuration || nextCurrentTime));
+  };
+
+  const resetInactiveDeck = () => {
+    const inactive = getInactiveAudio();
+    if (!inactive) {
+      return;
+    }
+    inactive.pause();
+    inactive.currentTime = 0;
+    inactive.removeAttribute("src");
+    inactive.load();
+    inactive.volume = 0;
+  };
+
+  const promoteDeck = (nextIndex) => {
+    activeDeckIndex = nextIndex;
+    syncDeckVolumes();
+    syncTimelineFromAudio(getActiveAudio());
+  };
+
+  const beginCrossfade = (fromAudio, toAudio, nextDeckIndex) => {
+    if (!fromAudio || !toAudio) {
+      promoteDeck(nextDeckIndex);
+      return;
+    }
+
+    stopCrossfade();
+    fadingAudio = fromAudio;
+    promoteDeck(nextDeckIndex);
+    const fadeToken = crossfadeToken;
+    const start = performance.now();
+    fromAudio.volume = clampUnit(muted() ? 0 : volume());
+    toAudio.volume = 0;
+
+    const step = (now) => {
+      if (fadeToken !== crossfadeToken) {
+        return;
+      }
+      const progress = Math.min(1, (now - start) / CROSSFADE_MS);
+      const target = clampUnit(muted() ? 0 : volume());
+      fromAudio.volume = clampUnit(target * (1 - progress));
+      toAudio.volume = clampUnit(target * progress);
+      if (progress < 1) {
+        crossfadeFrame = requestAnimationFrame(step);
+        return;
+      }
+      if (fadingAudio === fromAudio) {
+        fromAudio.pause();
+        fromAudio.currentTime = 0;
+        fromAudio.removeAttribute("src");
+        fromAudio.load();
+        fadingAudio = null;
+      }
+      syncDeckVolumes();
+    };
+
+    crossfadeFrame = requestAnimationFrame(step);
+  };
+
   const refreshAccountState = async () => {
     try {
-      const [sessionResponse, favoritesResponse, playlistsResponse] = await Promise.all([
-        fetch("/api/auth/session"),
+      setPreferenceStore("pending");
+      setPreferencesReady(false);
+      const sessionResponse = await fetch("/api/auth/session");
+      const sessionPayload = await sessionResponse.json();
+      const sessionUser = sessionPayload.user || null;
+      setUser(sessionUser);
+
+      if (!sessionUser) {
+        setFavoriteIds([]);
+        setPlaylists([]);
+        setGlobalPlaylists([]);
+        setSelectedPlaylistTarget("");
+        setSelectedGlobalPlaylistTarget("");
+        setAdminUsers([]);
+        setAirflowStatus(null);
+        setPreferenceStore("guest");
+        resetUserScopedPreferences();
+        return;
+      }
+
+      const [preferencesResponse, favoritesResponse, playlistsResponse] = await Promise.all([
+        fetch("/api/me/preferences"),
         fetch("/api/favorites"),
         fetch("/api/playlists"),
       ]);
-      const sessionPayload = await sessionResponse.json();
-      setUser(sessionPayload.user || null);
-      if (!sessionPayload.user?.is_admin) {
+
+      let nextPreferences = defaultUserPreferences();
+      if (preferencesResponse.ok) {
+        const preferencesPayload = await preferencesResponse.json();
+        nextPreferences = preferencesPayload.preferences || nextPreferences;
+      }
+
+      const guestPreferences = readGuestPreferences();
+      if (guestPreferences) {
+        const mergedPreferences = mergePreferences(nextPreferences, guestPreferences);
+        const updateResponse = await fetch("/api/me/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mergedPreferences),
+        });
+        if (updateResponse.ok) {
+          const updatePayload = await updateResponse.json();
+          nextPreferences = updatePayload.preferences || mergedPreferences;
+        } else {
+          nextPreferences = mergedPreferences;
+        }
+        clearGuestPreferences();
+      }
+      applyUserPreferences(nextPreferences);
+      setPreferenceStore("db");
+      setPreferencesReady(true);
+
+      if (!sessionUser.is_admin) {
         setAdminUsers([]);
         setAirflowStatus(null);
       }
@@ -345,6 +758,10 @@ function App() {
       setGlobalPlaylists([]);
       setSelectedPlaylistTarget("");
       setSelectedGlobalPlaylistTarget("");
+      setAdminUsers([]);
+      setAirflowStatus(null);
+      setPreferenceStore("guest");
+      resetUserScopedPreferences();
     }
   };
 
@@ -392,11 +809,18 @@ function App() {
     setSelectedGlobalPlaylistTarget("");
     setAdminUsers([]);
     setAirflowStatus(null);
+    setPreferenceStore("guest");
+    resetUserScopedPreferences();
   };
 
   const beginGoogleLogin = () => {
     if (!googleReady() || !window.google?.accounts?.id) {
       setAccountMessage("Google sign-in unavailable");
+      return;
+    }
+    const trigger = googleButtonRef?.querySelector?.('div[role="button"], iframe, [aria-labelledby]');
+    if (trigger instanceof HTMLElement) {
+      trigger.click();
       return;
     }
     setAccountMessage("");
@@ -701,8 +1125,25 @@ function App() {
       return;
     }
     setSpotifyImportUrl("");
-    setAccountMessage(`Imported ${payload.matchedCount} tracks`);
+    setAccountMessage(
+      `${payload.updatedExisting ? "Updated" : "Imported"} playlist: matched ${payload.matchedCount} of ${payload.totalCount} tracks`
+    );
     await refreshAccountState();
+  };
+
+  const generateAiPlaylists = async () => {
+    if (!user()) {
+      return;
+    }
+    setAccountMessage("Generating AI playlists...");
+    const response = await fetch("/api/playlists/ai/generate", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) {
+      setAccountMessage(payload.message || "Unable to generate AI playlists");
+      return;
+    }
+    await refreshAccountState();
+    setAccountMessage(`Generated ${payload.playlists?.length || 0} AI playlists${payload.source === "gemini" ? "" : " with local fallback"}`);
   };
 
   const openGlobalPlaylist = async (playlistId) => {
@@ -743,7 +1184,7 @@ function App() {
     if (!song) {
       return [];
     }
-    const list = visibleResults();
+    const list = activeSongList();
     const index = list.findIndex((item) => item.id === song.id);
     if (index < 0) {
       return [song.id];
@@ -789,35 +1230,66 @@ function App() {
   });
 
   const loadSong = (song, autoplay = false) => {
-    if (!song || !audioRef) {
+    const activeAudio = getActiveAudio();
+    const inactiveAudio = getInactiveAudio();
+    if (!song || !activeAudio || !inactiveAudio) {
       return;
     }
 
     const isSameSong = currentTrackId() === song.id;
     setSelectedId(song.id);
     setCurrentTrackId(song.id);
+    rememberRecentSong(song.id);
     prefetchSongIds(getSongNeighborhoodIds(song));
 
     const version = encodeURIComponent(song.updatedAt || song.id);
     const nextRelativeUrl = `${song.audioUrl}?v=${version}`;
     const nextUrl = new URL(nextRelativeUrl, window.location.origin).href;
-    if (audioRef.src !== nextUrl) {
-      audioRef.pause();
-      setIsPlaying(false);
+    if (activeAudio.src !== nextUrl) {
+      stopCrossfade();
       setStreamStarted(false);
-      setAudioSrc("");
-      audioRef.removeAttribute("src");
-      audioRef.load();
-      setAudioSrc(nextRelativeUrl);
-      audioRef.load();
-      setCurrentTime(0);
-      setDuration(0);
+      inactiveAudio.pause();
+      inactiveAudio.src = nextRelativeUrl;
+      inactiveAudio.preload = "auto";
+      inactiveAudio.currentTime = 0;
+      inactiveAudio.load();
+      syncTimelineFromAudio(inactiveAudio, true);
+      if (autoplay) {
+        inactiveAudio.volume = 0;
+        inactiveAudio.muted = muted();
+        void inactiveAudio.play()
+          .then(() => {
+            if (!activeAudio.src || activeAudio.paused) {
+              if (activeAudio.src && activeAudio !== inactiveAudio) {
+                activeAudio.pause();
+                activeAudio.currentTime = 0;
+                activeAudio.removeAttribute("src");
+                activeAudio.load();
+              }
+              promoteDeck(activeDeckIndex === 0 ? 1 : 0);
+              inactiveAudio.volume = muted() ? 0 : volume();
+              setIsPlaying(true);
+              setStreamStarted(true);
+              syncTimelineFromAudio(inactiveAudio, true);
+              return;
+            }
+            beginCrossfade(activeAudio, inactiveAudio, activeDeckIndex === 0 ? 1 : 0);
+            setIsPlaying(true);
+          })
+          .catch(() => {
+            inactiveAudio.pause();
+          });
+      } else if (!isSameSong) {
+        promoteDeck(activeDeckIndex === 0 ? 1 : 0);
+        activeAudio.pause();
+      }
+      return;
     }
 
     if (autoplay) {
-      void audioRef.play().catch(() => {});
-    } else if (!isSameSong && audioRef.preload !== "auto") {
-      audioRef.preload = "auto";
+      void activeAudio.play().catch(() => {});
+    } else if (!isSameSong && activeAudio.preload !== "auto") {
+      activeAudio.preload = "auto";
     }
   };
 
@@ -830,9 +1302,15 @@ function App() {
   };
 
   const pickRelativeSong = (offset, baseId = selectedId()) => {
-    const list = visibleResults();
+    const list = activeSongList();
     if (!list.length) {
       return null;
+    }
+
+    if (mainTab() === "radio") {
+      const current = list.findIndex((song) => song.id === baseId);
+      const nextIndex = current >= 0 ? (current + offset + list.length) % list.length : 0;
+      return list[nextIndex] || null;
     }
 
     if (repeatMode() === "random") {
@@ -860,12 +1338,13 @@ function App() {
   };
 
   const adjustSeek = (deltaSeconds) => {
-    if (!audioRef || !currentSong()) {
+    const activeAudio = getActiveAudio();
+    if (!activeAudio || !currentSong()) {
       return;
     }
-    const total = Number.isFinite(audioRef.duration) && audioRef.duration > 0 ? audioRef.duration : duration();
-    const next = Math.max(0, Math.min(total || 0, (audioRef.currentTime || 0) + deltaSeconds));
-    audioRef.currentTime = next;
+    const total = Number.isFinite(activeAudio.duration) && activeAudio.duration > 0 ? activeAudio.duration : duration();
+    const next = Math.max(0, Math.min(total || 0, (activeAudio.currentTime || 0) + deltaSeconds));
+    activeAudio.currentTime = next;
     setCurrentTime(next);
   };
 
@@ -876,19 +1355,21 @@ function App() {
   };
 
   const togglePlayback = () => {
-    if (!audioRef) {
+    const activeAudio = getActiveAudio();
+    if (!activeAudio) {
       return;
     }
 
-    if (!currentSong() && visibleResults()[0]) {
-      loadSong(selectedSong() || visibleResults()[0], true);
+    if (!currentSong() && activeSongList()[0]) {
+      loadSong(selectedSong() || activeSongList()[0], true);
       return;
     }
 
-    if (audioRef.paused) {
-      void audioRef.play().catch(() => {});
+    if (activeAudio.paused) {
+      void activeAudio.play().catch(() => {});
     } else {
-      audioRef.pause();
+      stopCrossfade();
+      activeAudio.pause();
     }
   };
 
@@ -902,6 +1383,17 @@ function App() {
   };
 
   onMount(async () => {
+    applyUserPreferences(readGuestPreferences() || defaultUserPreferences());
+
+    themeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    syncSystemTheme = () => setSystemTheme(themeMediaQuery.matches ? "dark" : "light");
+    syncSystemTheme();
+    if (typeof themeMediaQuery.addEventListener === "function") {
+      themeMediaQuery.addEventListener("change", syncSystemTheme);
+    } else {
+      themeMediaQuery.addListener(syncSystemTheme);
+    }
+
     worker = new Worker(new URL("./search.worker.js", import.meta.url), { type: "module" });
 
     worker.onmessage = (event) => {
@@ -956,11 +1448,11 @@ function App() {
         adjustSeek(5);
       } else if (event.key === "Enter") {
         event.preventDefault();
-        loadSong(selectedSong() || visibleResults()[0], true);
+        loadSong(selectedSong() || activeSongList()[0], true);
       } else if (event.key === " ") {
         event.preventDefault();
         if (!isPlaying()) {
-          loadSong(selectedSong() || visibleResults()[0], true);
+          loadSong(selectedSong() || activeSongList()[0], true);
         } else {
           togglePlayback();
         }
@@ -987,6 +1479,8 @@ function App() {
       const initialSongs = songsPayload.songs;
 
       setGoogleClientId(configPayload.googleClientId || "");
+      setGeminiRadioEnabled(Boolean(configPayload.geminiRadioEnabled));
+      setGeminiKeyCount(Number(configPayload.geminiKeyCount || 0));
       setSpotifyClientId(configPayload.spotifyClientId || "");
       setSpotifyRedirectUri(configPayload.spotifyRedirectUri || "");
       setSpotifyScopes(configPayload.spotifyScopes || "");
@@ -998,14 +1492,17 @@ function App() {
       worker.postMessage({ type: "index", payload: initialSongs });
       prefetchSongIds(initialSongs.slice(0, 4).map((song) => song.id));
 
-      if (initialSongs[0] && audioRef) {
+      if (initialSongs[0] && getActiveAudio()) {
         const version = encodeURIComponent(initialSongs[0].updatedAt || initialSongs[0].id);
-        setAudioSrc(`${initialSongs[0].audioUrl}?v=${version}`);
-        audioRef.volume = volume();
+        getActiveAudio().src = `${initialSongs[0].audioUrl}?v=${version}`;
+        getActiveAudio().preload = "auto";
+        syncDeckVolumes();
+        syncTimelineFromAudio(getActiveAudio(), true);
       }
 
       await completeSpotifyAuthFromUrl();
       await refreshAccountState();
+      await fetchRadioStations();
       if (user()?.is_admin) {
         await refreshAdminState();
       }
@@ -1020,23 +1517,30 @@ function App() {
     clearTimeout(searchTimeout);
     const nextQuery = query().trim().toLowerCase();
     searchTimeout = setTimeout(() => sendSearch(nextQuery), 15);
-    localStorage.setItem("isaibox-query", query());
   });
 
   createEffect(() => {
-    if (audioRef) {
-      audioRef.volume = volume();
-      audioRef.muted = muted();
-    }
-    localStorage.setItem("isaibox-volume", String(volume()));
-    localStorage.setItem("isaibox-muted", muted() ? "1" : "0");
-    localStorage.setItem("isaibox-repeat-mode", repeatMode());
-    localStorage.setItem("isaibox-autoplay-next", autoplayNext() ? "1" : "0");
+    syncDeckVolumes();
   });
 
   createEffect(() => {
     document.documentElement.dataset.theme = theme();
-    localStorage.setItem("isaibox-theme", theme());
+  });
+
+  createEffect(() => {
+    if (!preferencesReady() || preferenceStore() === "pending") {
+      return;
+    }
+    if (preferenceStore() === "guest") {
+      writeGuestPreferences(collectCurrentPreferences());
+      return;
+    }
+    const payload = collectCurrentPreferences();
+    void fetch("/api/me/preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
   });
 
   createEffect(() => {
@@ -1055,7 +1559,7 @@ function App() {
   });
 
   createEffect(() => {
-    if (!googleClientId() || user() || !window.google?.accounts?.id) {
+    if (!googleClientId() || user() || !window.google?.accounts?.id || googleInitialized()) {
       return;
     }
     window.google.accounts.id.initialize({
@@ -1066,7 +1570,24 @@ function App() {
         }
       },
     });
+    setGoogleInitialized(true);
     setGoogleReady(true);
+  });
+
+  createEffect(() => {
+    if (!googleReady() || user() || !googleButtonRef || !window.google?.accounts?.id) {
+      return;
+    }
+    googleButtonRef.innerHTML = "";
+    window.google.accounts.id.renderButton(googleButtonRef, {
+      type: "standard",
+      theme: theme() === "dark" ? "filled_black" : "outline",
+      size: "large",
+      shape: "pill",
+      text: "signin_with",
+      logo_alignment: "left",
+      width: 240,
+    });
   });
 
   createEffect(() => {
@@ -1082,7 +1603,7 @@ function App() {
   });
 
   createEffect(() => {
-    const list = visibleResults();
+    const list = activeSongList();
     if (!list.length) {
       if (selectedId()) {
         setSelectedId("");
@@ -1120,15 +1641,34 @@ function App() {
     }
   });
 
+  createEffect(() => {
+    if (mainTab() !== "radio" || radioQueue().length || !songs().length) {
+      return;
+    }
+    if (radioStations().length) {
+      applyRadioStation(selectedRadioStationId() || radioStations()[0]?.id || "", false);
+      return;
+    }
+    setRadioQueue(buildRadioQueue(currentTrackId()));
+  });
+
   onCleanup(() => {
     clearTimeout(searchTimeout);
     clearTimeout(prefetchTimer);
     clearTimeout(keyboardNavTimer);
     clearInterval(adminRefreshTimer);
+    stopCrossfade();
     cancelAnimationFrame(scrollAnimationFrame);
     removeKeydownListener?.();
     worker?.terminate();
-    audioRef?.pause();
+    audioRefs.forEach((audio) => audio?.pause());
+    if (themeMediaQuery && syncSystemTheme) {
+      if (typeof themeMediaQuery.removeEventListener === "function") {
+        themeMediaQuery.removeEventListener("change", syncSystemTheme);
+      } else {
+        themeMediaQuery.removeListener(syncSystemTheme);
+      }
+    }
   });
 
   return (
@@ -1139,6 +1679,13 @@ function App() {
           <span class="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--brand)]">isaibox</span>
         </span>
         <div class="flex items-center gap-2 md:gap-3">
+          <div
+            ref={(el) => {
+              googleButtonRef = el;
+            }}
+            aria-hidden="true"
+            class="pointer-events-none absolute left-[-9999px] top-0 opacity-0"
+          />
           <Show
             when={user()}
             fallback={
@@ -1165,8 +1712,11 @@ function App() {
                     Admin
                   </button>
                 </Show>
-                <span class="hidden font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] md:block">
-                  {account().name || account().email}
+                <span
+                  title={account().name || account().email || "Account"}
+                  class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--soft)]"
+                >
+                  {getInitials(account().name, account().email)}
                 </span>
                 <button
                   type="button"
@@ -1182,10 +1732,12 @@ function App() {
           </Show>
           <button
             type="button"
-            onClick={() => setTheme((value) => (value === "dark" ? "light" : "dark"))}
-            class="rounded-full border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
+            onClick={toggleThemePreference}
+            aria-label={theme() === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={theme() === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
           >
-            {theme() === "dark" ? "Light" : "Dark"}
+            <ThemeIcon theme={theme()} />
           </button>
           <span class="hidden font-mono text-xs text-[var(--muted)] md:block">
             <Show when={stats()} fallback={"..."}>
@@ -1195,30 +1747,49 @@ function App() {
         </div>
       </header>
 
-      <section class="flex items-center gap-3 border-b border-[var(--line)] px-6 py-4">
-        <span class="font-mono text-sm text-[var(--soft)]">/</span>
-        <input
-          value={query()}
-          onInput={(event) => {
-            setMovieFilter("");
-            setArtistFilter("");
-            setQuery(event.currentTarget.value);
-          }}
-          placeholder="Search tracks, singers, albums..."
-          class="w-full bg-transparent font-mono text-sm tracking-wide text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
-        />
-        <button
-          type="button"
-          onClick={() => {
-            setMovieFilter("");
-            setArtistFilter("");
-            setQuery("");
-          }}
-          class="font-mono text-xs uppercase tracking-[0.2em] text-[var(--muted)] transition hover:text-[var(--fg)]"
-        >
-          Clear
-        </button>
+      <section class="border-b border-[var(--line)] px-6 py-3">
+        <div class="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em]">
+          <button type="button" onClick={() => setMainBrowseTab("library")} class={mainTab() === "library" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>
+            Library
+          </button>
+          <button type="button" onClick={() => setMainBrowseTab("recents")} class={mainTab() === "recents" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>
+            Recents {recentSongs().length ? `(${recentSongs().length})` : ""}
+          </button>
+          <button type="button" onClick={() => setMainBrowseTab("favorites")} class={mainTab() === "favorites" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>
+            Favorites {favoriteSongs().length ? `(${favoriteSongs().length})` : ""}
+          </button>
+          <button type="button" onClick={() => setMainBrowseTab("radio")} class={mainTab() === "radio" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>
+            Radio
+          </button>
+        </div>
       </section>
+
+      <Show when={mainTab() === "library"}>
+        <section class="flex items-center gap-3 border-b border-[var(--line)] px-6 py-4">
+          <span class="font-mono text-sm text-[var(--soft)]">/</span>
+          <input
+            value={query()}
+            onInput={(event) => {
+              setMovieFilter("");
+              setArtistFilter("");
+              setQuery(event.currentTarget.value);
+            }}
+            placeholder="Search tracks, singers, albums..."
+            class="w-full bg-transparent font-mono text-sm tracking-wide text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setMovieFilter("");
+              setArtistFilter("");
+              setQuery("");
+            }}
+            class="font-mono text-xs uppercase tracking-[0.2em] text-[var(--muted)] transition hover:text-[var(--fg)]"
+          >
+            Clear
+          </button>
+        </section>
+      </Show>
 
       <Show when={user()}>
         <section class="border-b border-[var(--line-soft)] px-6 py-3">
@@ -1239,6 +1810,16 @@ function App() {
             >
               Create playlist
             </button>
+            <Show when={geminiRadioEnabled()}>
+              <button
+                type="button"
+                onClick={() => void generateAiPlaylists()}
+                class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+                title={geminiKeyCount() ? `${geminiKeyCount()} Gemini keys configured` : "Gemini not configured"}
+              >
+                AI playlists
+              </button>
+            </Show>
             <Show when={playlists().length > 0}>
               <select
                 value={selectedPlaylistTarget()}
@@ -1562,15 +2143,17 @@ function App() {
         </section>
       </Show>
 
-      <section class="border-b border-[var(--line-soft)] px-6 py-2">
-        <div class="flex items-center gap-4 font-mono text-[10px] uppercase tracking-[0.22em]">
-          <button type="button" onClick={() => setSearchTab("songs")} class={searchTab() === "songs" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Songs</button>
-          <button type="button" onClick={() => setSearchTab("albums")} class={searchTab() === "albums" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Albums</button>
-          <button type="button" onClick={() => setSearchTab("artists")} class={searchTab() === "artists" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Artists</button>
-        </div>
-      </section>
+      <Show when={mainTab() === "library"}>
+        <section class="border-b border-[var(--line-soft)] px-6 py-2">
+          <div class="flex items-center gap-4 font-mono text-[10px] uppercase tracking-[0.22em]">
+            <button type="button" onClick={() => setSearchTab("songs")} class={searchTab() === "songs" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Songs</button>
+            <button type="button" onClick={() => setSearchTab("albums")} class={searchTab() === "albums" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Albums</button>
+            <button type="button" onClick={() => setSearchTab("artists")} class={searchTab() === "artists" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Artists</button>
+          </div>
+        </section>
+      </Show>
 
-      <Show when={query().trim() || movieFilter() || artistFilter()}>
+      <Show when={mainTab() === "library" && (query().trim() || movieFilter() || artistFilter())}>
         <section class="border-b border-[var(--line-soft)] px-6 py-4">
           <div class="flex items-center justify-between gap-4">
             <div class="min-w-0">
@@ -1660,7 +2243,76 @@ function App() {
       </Show>
 
       <section class="flex min-h-0 flex-1 flex-col">
-        <Show when={searchTab() === "songs" || movieFilter() || artistFilter()}>
+        <Show when={mainTab() !== "library"}>
+          <section class="border-b border-[var(--line-soft)] px-6 py-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
+                  {mainTab() === "recents" ? "Recent plays" : mainTab() === "favorites" ? "Favorites" : "Radio station"}
+                </div>
+                <div class="mt-1 text-sm text-[var(--soft)]">
+                  {mainTab() === "recents"
+                    ? "Recently played tracks, kept like a rolling playlist."
+                    : mainTab() === "favorites"
+                      ? "Your liked tracks as a playable list."
+                      : currentRadioStation()?.blurb || "Gemini-sorted stations with looping 100-song queues."}
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+                <span>{activeSongList().length} tracks</span>
+                <Show when={mainTab() === "recents" && recentSongs().length > 0}>
+                  <button type="button" onClick={clearRecents} class="transition hover:text-[var(--fg)]">Clear recents</button>
+                </Show>
+                <Show when={mainTab() === "radio"}>
+                  <button type="button" onClick={startRadio} class="transition hover:text-[var(--fg)]">Start radio</button>
+                  <button type="button" onClick={() => void fetchRadioStations(true)} class="transition hover:text-[var(--fg)]">
+                    Refresh stations
+                  </button>
+                </Show>
+              </div>
+            </div>
+            <Show when={mainTab() === "radio"}>
+              <div class="mt-4">
+                <div class="mb-2 flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+                  <span>{radioLoading() ? "Building stations..." : `${radioStations().length} stations`}</span>
+                  <Show when={currentRadioStation()}>
+                    <span>{currentRadioStation().yearStart} - {currentRadioStation().yearEnd}</span>
+                  </Show>
+                  <Show when={geminiRadioEnabled()}>
+                    <span>Gemini radio</span>
+                  </Show>
+                  <Show when={radioMessage()}>
+                    <span>{radioMessage()}</span>
+                  </Show>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <For each={radioStations()}>
+                    {(station) => (
+                      <button
+                        type="button"
+                        onClick={() => applyRadioStation(station.id, false)}
+                        class={`max-w-[220px] border px-3 py-2 text-left transition ${
+                          selectedRadioStationId() === station.id
+                            ? "border-[var(--fg)] bg-[var(--hover)]"
+                            : "border-[var(--line)] hover:border-[var(--fg)]"
+                        }`}
+                      >
+                        <div class="truncate text-sm">{station.name}</div>
+                        <div class="mt-1 line-clamp-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--soft)]">
+                          {station.blurb}
+                        </div>
+                        <div class="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
+                          {station.yearStart} - {station.yearEnd} · {station.trackCount}
+                        </div>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+          </section>
+        </Show>
+        <Show when={mainTab() !== "library" || searchTab() === "songs" || movieFilter() || artistFilter()}>
           <>
             <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2">
               <span class="w-8 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">#</span>
@@ -1675,11 +2327,11 @@ function App() {
             <Show when={!loading()} fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">Loading</div>}>
               <Show when={!error()} fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--soft)]">{error()}</div>}>
                 <Show
-                  when={visibleResults().length > 0}
+                  when={activeSongList().length > 0}
                   fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">No results</div>}
                 >
                   <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto">
-                    <For each={visibleResults()}>
+                    <For each={activeSongList()}>
                       {(song, index) => {
                         const active = () => selectedSong()?.id === song.id;
                         return (
@@ -1744,7 +2396,7 @@ function App() {
             </Show>
           </>
         </Show>
-        <Show when={searchTab() === "albums" && !movieFilter() && !artistFilter()}>
+        <Show when={mainTab() === "library" && searchTab() === "albums" && !movieFilter() && !artistFilter()}>
           <div class="flex flex-1 items-start p-6">
             <div class="flex flex-wrap gap-2">
               <For each={visibleAlbums()}>
@@ -1765,7 +2417,7 @@ function App() {
             </div>
           </div>
         </Show>
-        <Show when={searchTab() === "artists" && !movieFilter() && !artistFilter()}>
+        <Show when={mainTab() === "library" && searchTab() === "artists" && !movieFilter() && !artistFilter()}>
           <div class="flex flex-1 items-start p-6">
             <div class="flex flex-wrap gap-2">
               <For each={visibleArtists()}>
@@ -1809,8 +2461,9 @@ function App() {
             value={currentTime()}
             onInput={(event) => {
               const next = Number(event.currentTarget.value);
-              if (audioRef) {
-                audioRef.currentTime = next;
+              const activeAudio = getActiveAudio();
+              if (activeAudio) {
+                activeAudio.currentTime = next;
               }
               setCurrentTime(next);
             }}
@@ -1863,46 +2516,77 @@ function App() {
             <span class="w-6 text-right font-mono text-[10px] text-[var(--muted)]">{Math.round(muted() ? 0 : volume() * 100)}</span>
           </div>
         </div>
-        <audio
-          ref={(el) => {
-            audioRef = el;
-          }}
-          preload="auto"
-          onPlay={() => setIsPlaying(true)}
-          onPlaying={() => {
-            setIsPlaying(true);
-            setStreamStarted(true);
-          }}
-          onWaiting={() => setStreamStarted(false)}
-          onPause={() => setIsPlaying(false)}
-          onLoadedMetadata={() => setDuration(audioRef?.duration || 0)}
-          onTimeUpdate={() => setCurrentTime(audioRef?.currentTime || 0)}
-          onEnded={() => {
-            if (repeatMode() === "one") {
-              if (audioRef) {
-                audioRef.currentTime = 0;
-                void audioRef.play().catch(() => {});
-              }
-              return;
-            }
-            if (!autoplayNext()) {
-              setIsPlaying(false);
-              return;
-            }
-            if (repeatMode() === "album" || repeatMode() === "random") {
-              selectRelative(1, true, currentTrackId() || selectedId());
-              return;
-            }
-            const current = visibleResults().findIndex((song) => song.id === (currentTrackId() || selectedId()));
-            if (current >= 0 && current < visibleResults().length - 1) {
-              selectRelative(1, true, currentTrackId() || selectedId());
-            } else {
-              setIsPlaying(false);
-            }
-          }}
-        >
-          <source src={audioSrc()} type="audio/mpeg" />
-        </audio>
+        <For each={[0, 1]}>
+          {(deckIndex) => (
+            <audio
+              ref={(el) => {
+                audioRefs[deckIndex] = el;
+              }}
+              preload="auto"
+              onPlay={(event) => {
+                if (event.currentTarget === getActiveAudio()) {
+                  setIsPlaying(true);
+                  syncTimelineFromAudio(event.currentTarget);
+                }
+              }}
+              onPlaying={(event) => {
+                if (event.currentTarget === getActiveAudio()) {
+                  setIsPlaying(true);
+                  setStreamStarted(true);
+                  syncTimelineFromAudio(event.currentTarget);
+                }
+              }}
+              onWaiting={(event) => {
+                if (event.currentTarget === getActiveAudio()) {
+                  setStreamStarted(false);
+                }
+              }}
+              onPause={(event) => {
+                if (event.currentTarget === getActiveAudio()) {
+                  setIsPlaying(false);
+                }
+              }}
+              onLoadedMetadata={(event) => {
+                if (event.currentTarget === getActiveAudio()) {
+                  syncTimelineFromAudio(event.currentTarget);
+                }
+              }}
+              onTimeUpdate={(event) => {
+                if (event.currentTarget === getActiveAudio()) {
+                  syncTimelineFromAudio(event.currentTarget);
+                }
+              }}
+              onEnded={(event) => {
+                if (event.currentTarget !== getActiveAudio()) {
+                  return;
+                }
+                if (repeatMode() === "one") {
+                  event.currentTarget.currentTime = 0;
+                  void event.currentTarget.play().catch(() => {});
+                  return;
+                }
+                if (!autoplayNext()) {
+                  setIsPlaying(false);
+                  return;
+                }
+                if (mainTab() === "radio") {
+                  selectRelative(1, true, currentTrackId() || selectedId());
+                  return;
+                }
+                if (repeatMode() === "album" || repeatMode() === "random") {
+                  selectRelative(1, true, currentTrackId() || selectedId());
+                  return;
+                }
+                const current = activeSongList().findIndex((song) => song.id === (currentTrackId() || selectedId()));
+                if (current >= 0 && current < activeSongList().length - 1) {
+                  selectRelative(1, true, currentTrackId() || selectedId());
+                } else {
+                  setIsPlaying(false);
+                }
+              }}
+            />
+          )}
+        </For>
       </footer>
     </main>
   );

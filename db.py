@@ -126,19 +126,57 @@ CREATE TABLE IF NOT EXISTS playlist_songs (
     PRIMARY KEY (playlist_id, position)
 );
 
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id             VARCHAR PRIMARY KEY,
+    theme_preference    VARCHAR DEFAULT 'system',
+    main_tab            VARCHAR DEFAULT 'library',
+    recent_song_ids     VARCHAR,
+    player_volume       DOUBLE DEFAULT 0.9,
+    player_muted        BOOLEAN DEFAULT FALSE,
+    repeat_mode         VARCHAR DEFAULT 'off',
+    autoplay_next       BOOLEAN DEFAULT TRUE,
+    updated_at          TIMESTAMPTZ
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON user_sessions (user_id);
 CREATE INDEX IF NOT EXISTS idx_favorites_user_id ON favorite_songs (user_id);
 CREATE INDEX IF NOT EXISTS idx_playlists_user_id ON playlists (user_id);
 CREATE INDEX IF NOT EXISTS idx_playlist_songs_playlist_id ON playlist_songs (playlist_id);
 """
 
-_MIGRATIONS = [
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason VARCHAR",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ",
-    "ALTER TABLE playlists ADD COLUMN IF NOT EXISTS is_global BOOLEAN DEFAULT FALSE",
-]
+_MIGRATIONS = {
+    "users": {
+        "is_admin": "BOOLEAN DEFAULT FALSE",
+        "is_banned": "BOOLEAN DEFAULT FALSE",
+        "ban_reason": "VARCHAR",
+        "last_login_at": "TIMESTAMPTZ",
+    },
+    "playlists": {
+        "is_global": "BOOLEAN DEFAULT FALSE",
+    },
+    "user_preferences": {
+        "theme_preference": "VARCHAR DEFAULT 'system'",
+        "main_tab": "VARCHAR DEFAULT 'library'",
+        "recent_song_ids": "VARCHAR",
+        "player_volume": "DOUBLE DEFAULT 0.9",
+        "player_muted": "BOOLEAN DEFAULT FALSE",
+        "repeat_mode": "VARCHAR DEFAULT 'off'",
+        "autoplay_next": "BOOLEAN DEFAULT TRUE",
+        "updated_at": "TIMESTAMPTZ",
+    },
+}
+
+
+def _ensure_migrations(conn: duckdb.DuckDBPyConnection) -> None:
+    for table_name, columns in _MIGRATIONS.items():
+        existing = {
+            row[1]
+            for row in conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+        }
+        for column_name, column_sql in columns.items():
+            if column_name in existing:
+                continue
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 # ── Connection factory ────────────────────────────────────────────────────────
 
@@ -148,8 +186,7 @@ def get_conn(path: str = DUCKDB_PATH, read_only: bool = False) -> duckdb.DuckDBP
     conn = duckdb.connect(path, read_only=read_only)
     if not read_only:
         conn.execute(_SCHEMA)
-        for migration in _MIGRATIONS:
-            conn.execute(migration)
+        _ensure_migrations(conn)
     return conn
 
 
