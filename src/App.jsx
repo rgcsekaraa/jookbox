@@ -2,6 +2,38 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 
 const CROSSFADE_MS = 900;
 const clampUnit = (value) => Math.max(0, Math.min(1, value));
+const GOOGLE_GSI_SRC = "https://accounts.google.com/gsi/client";
+let googleScriptPromise;
+
+const ensureGoogleScript = () => {
+  if (typeof window === "undefined") {
+    return Promise.resolve();
+  }
+  if (window.google?.accounts?.id) {
+    return Promise.resolve();
+  }
+  if (googleScriptPromise) {
+    return googleScriptPromise;
+  }
+  const existing = document.querySelector(`script[src="${GOOGLE_GSI_SRC}"]`);
+  if (existing) {
+    googleScriptPromise = new Promise((resolve, reject) => {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Failed to load Google sign-in")), { once: true });
+    });
+    return googleScriptPromise;
+  }
+  googleScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = GOOGLE_GSI_SRC;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Google sign-in"));
+    document.head.appendChild(script);
+  });
+  return googleScriptPromise;
+};
 
 const formatTime = (seconds) => {
   if (!Number.isFinite(seconds) || seconds < 0) {
@@ -312,6 +344,7 @@ function App() {
   const [radioMessage, setRadioMessage] = createSignal("");
   const [streamStarted, setStreamStarted] = createSignal(false);
   const [keyboardNavigating, setKeyboardNavigating] = createSignal(false);
+  const [localMode, setLocalMode] = createSignal(false);
   const [googleClientId, setGoogleClientId] = createSignal("");
   const [geminiRadioEnabled, setGeminiRadioEnabled] = createSignal(false);
   const [geminiKeyCount, setGeminiKeyCount] = createSignal(0);
@@ -384,6 +417,9 @@ function App() {
   const rowRefs = new Map();
 
   const easeOutQuint = (value) => 1 - (1 - value) ** 5;
+  const authEnabled = createMemo(() => !localMode());
+  const libraryProfileEnabled = createMemo(() => localMode() || Boolean(user()));
+  const spotifyEnabled = createMemo(() => authEnabled() && Boolean(spotifyClientId()));
 
   const animateListScroll = (targetScrollTop) => {
     if (!listRef) {
@@ -2225,6 +2261,7 @@ function App() {
       const songsPayload = await songsResponse.json();
       const initialSongs = songsPayload.songs;
 
+      setLocalMode(Boolean(configPayload.localMode));
       setGoogleClientId(configPayload.googleClientId || "");
       setGeminiRadioEnabled(Boolean(configPayload.geminiRadioEnabled));
       setGeminiKeyCount(Number(configPayload.geminiKeyCount || 0));
@@ -2247,7 +2284,9 @@ function App() {
         syncTimelineFromAudio(getActiveAudio(), true);
       }
 
-      await completeSpotifyAuthFromUrl();
+      if (!Boolean(configPayload.localMode)) {
+        await completeSpotifyAuthFromUrl();
+      }
       await refreshAccountState();
       void fetchRadioStations().catch(() => {});
       if (user()?.is_admin) {
@@ -2277,6 +2316,29 @@ function App() {
 
   createEffect(() => {
     document.documentElement.dataset.theme = theme();
+  });
+
+  createEffect(() => {
+    if (!authEnabled() || !googleClientId()) {
+      setGoogleReady(false);
+      return;
+    }
+    if (window.google?.accounts?.id) {
+      setGoogleReady(true);
+      return;
+    }
+    void ensureGoogleScript()
+      .then(() => setGoogleReady(true))
+      .catch(() => setGoogleReady(false));
+  });
+
+  createEffect(() => {
+    if (authEnabled()) {
+      return;
+    }
+    setShowAuthPrompt(false);
+    setShowProfileMenu(false);
+    setAccountMessage("");
   });
 
   createEffect(() => {
@@ -2320,7 +2382,7 @@ function App() {
   });
 
   createEffect(() => {
-    if (!googleClientId() || user() || !window.google?.accounts?.id || googleInitialized()) {
+    if (!authEnabled() || !googleClientId() || user() || !window.google?.accounts?.id || googleInitialized()) {
       return;
     }
     window.google.accounts.id.initialize({
@@ -2336,7 +2398,7 @@ function App() {
   });
 
   createEffect(() => {
-    if (!googleReady() || user() || !googleButtonRef || !window.google?.accounts?.id) {
+    if (!authEnabled() || !googleReady() || user() || !googleButtonRef || !window.google?.accounts?.id) {
       return;
     }
     googleButtonRef.innerHTML = "";
@@ -2454,8 +2516,8 @@ function App() {
 
   return (
     <main class="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--bg)] text-[var(--fg)]">
-      <header class="flex items-center justify-between border-b border-[var(--line)] px-6 py-4">
-        <span class="group relative inline-flex items-center gap-3">
+      <header class="flex min-w-0 flex-wrap items-center gap-3 border-b border-[var(--line)] px-6 py-4 sm:flex-nowrap sm:justify-between">
+        <span class="group relative inline-flex shrink-0 items-center gap-3">
           <BrandIcon />
           <span class="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--brand)]">isaibox</span>
           <span class="pointer-events-none absolute left-0 top-full z-20 mt-3 min-w-[220px] border border-[var(--line)] bg-[var(--bg)] px-3 py-3 opacity-0 shadow-lg transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
@@ -2472,7 +2534,7 @@ function App() {
             </div>
           </span>
         </span>
-        <div class="flex items-center gap-2 md:gap-3">
+        <div class="ml-auto flex min-w-0 items-center justify-end gap-2 md:gap-3">
           <div
             ref={(el) => {
               googleButtonRef = el;
@@ -2480,6 +2542,12 @@ function App() {
             aria-hidden="true"
             class="pointer-events-none absolute left-[-9999px] top-0 opacity-0"
           />
+          <Show when={localMode()}>
+            <span class="rounded-full border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+              Local library
+            </span>
+          </Show>
+          <Show when={authEnabled()}>
           <Show
             when={user()}
             fallback={
@@ -2537,7 +2605,7 @@ function App() {
             }
           >
             {(account) => (
-              <div class="flex items-center gap-2 md:gap-3">
+              <div class="flex min-w-0 items-center gap-2 md:gap-3">
                 <Show when={account().is_admin}>
                   <span class="rounded-full border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
                     Admin
@@ -2562,7 +2630,7 @@ function App() {
                     <span class="flex h-7 w-7 items-center justify-center rounded-full border border-current font-mono text-[11px] uppercase tracking-[0.16em]">
                       {getInitials(account().name, account().email)}
                     </span>
-                    <span class="hidden max-w-[160px] truncate text-sm md:block">{account().name || account().email}</span>
+                    <span class="hidden max-w-[120px] truncate text-sm md:block lg:max-w-[160px]">{account().name || account().email}</span>
                     <ChevronDownIcon />
                   </button>
                   <Show when={showProfileMenu()}>
@@ -2604,6 +2672,7 @@ function App() {
               </div>
             )}
           </Show>
+          </Show>
         </div>
       </header>
 
@@ -2616,7 +2685,7 @@ function App() {
             <button type="button" onClick={() => setMainBrowseTab("recents")} class={`px-1 py-1 ${mainTab() === "recents" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
               Recents
             </button>
-            <Show when={user()}>
+            <Show when={libraryProfileEnabled()}>
               <button type="button" onClick={() => setMainBrowseTab("favorites")} class={`px-1 py-1 ${mainTab() === "favorites" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
                 Favorites {favoriteSongs().length ? `(${favoriteSongs().length})` : ""}
               </button>
@@ -2624,7 +2693,7 @@ function App() {
             <button type="button" onClick={() => setMainBrowseTab("radio")} class={`px-1 py-1 ${mainTab() === "radio" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
               Radio
             </button>
-            <Show when={user()?.is_admin}>
+            <Show when={authEnabled() && user()?.is_admin}>
               <button type="button" onClick={() => setMainBrowseTab("admin")} class={`px-1 py-1 ${mainTab() === "admin" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
                 Admin
               </button>
@@ -2664,7 +2733,7 @@ function App() {
         </div>
       </section>
 
-      <Show when={user()}>
+      <Show when={libraryProfileEnabled()}>
         <section class="border-b border-[var(--line-soft)] px-6 py-3">
           <div class="flex flex-wrap items-center gap-3">
             <span class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
@@ -2701,20 +2770,20 @@ function App() {
                 Add current
               </button>
             </Show>
-            <input
-              value={spotifyImportUrl()}
-              onInput={(event) => setSpotifyImportUrl(event.currentTarget.value)}
-              placeholder="Paste Spotify playlist link"
-              class="min-w-[220px] flex-1 bg-transparent font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
-            />
-            <button
-              type="button"
-              onClick={() => void importSpotifyPlaylist()}
-              class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-            >
-              Import Spotify
-            </button>
-            <Show when={spotifyClientId()}>
+            <Show when={spotifyEnabled()}>
+              <input
+                value={spotifyImportUrl()}
+                onInput={(event) => setSpotifyImportUrl(event.currentTarget.value)}
+                placeholder="Paste Spotify playlist link"
+                class="min-w-[220px] flex-1 bg-transparent font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
+              />
+              <button
+                type="button"
+                onClick={() => void importSpotifyPlaylist()}
+                class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+              >
+                Import Spotify
+              </button>
               <button
                 type="button"
                 onClick={() => void (spotifyConnected() ? disconnectSpotify() : beginSpotifyConnect())}
@@ -3172,11 +3241,11 @@ function App() {
                   <div class="flex items-center justify-between gap-4"><span>Show shortcuts</span><span class="font-mono text-[11px] text-[var(--soft)]">?</span></div>
                   <div class="flex items-center justify-between gap-4"><span>Library</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+1</span></div>
                   <div class="flex items-center justify-between gap-4"><span>Recents</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+2</span></div>
-                  <Show when={user()}>
+                  <Show when={libraryProfileEnabled()}>
                     <div class="flex items-center justify-between gap-4"><span>Favorites</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+3</span></div>
                   </Show>
                   <div class="flex items-center justify-between gap-4"><span>Radio</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+4 or R</span></div>
-                  <Show when={user()?.is_admin}>
+                  <Show when={authEnabled() && user()?.is_admin}>
                     <div class="flex items-center justify-between gap-4"><span>Admin</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+5</span></div>
                   </Show>
                 </div>
@@ -3187,7 +3256,7 @@ function App() {
                   <div class="flex items-center justify-between gap-4"><span>Seek</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl + Left / Right</span></div>
                   <div class="flex items-center justify-between gap-4"><span>Volume</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl + Up / Down</span></div>
                   <div class="flex items-center justify-between gap-4"><span>Prev / next song</span><span class="font-mono text-[11px] text-[var(--soft)]">[ and ]</span></div>
-                  <Show when={user()}>
+                  <Show when={libraryProfileEnabled()}>
                     <div class="flex items-center justify-between gap-4"><span>Favorite current</span><span class="font-mono text-[11px] text-[var(--soft)]">L</span></div>
                   </Show>
                   <div class="flex items-center justify-between gap-4"><span>Mute</span><span class="font-mono text-[11px] text-[var(--soft)]">M</span></div>
@@ -3332,7 +3401,7 @@ function App() {
               <aside class="min-h-0 overflow-y-auto border border-[var(--line)] bg-[var(--panel)] p-4">
                 <div class="flex items-center justify-between gap-3">
                   <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlists</div>
-                  <Show when={!user()}>
+                  <Show when={authEnabled() && !user()}>
                     <button
                       type="button"
                       onClick={() => setShowAuthPrompt(true)}
@@ -3345,7 +3414,7 @@ function App() {
                   </Show>
                 </div>
 
-                <Show when={user()}>
+                <Show when={libraryProfileEnabled()}>
                   <div class="mt-4 flex items-center gap-2">
                     <input
                       value={playlistNameInput()}
@@ -4056,7 +4125,7 @@ function App() {
           </div>
         </div>
       </Show>
-      <Show when={showAuthPrompt()}>
+      <Show when={authEnabled() && showAuthPrompt()}>
         <div class="absolute inset-0 z-50 bg-black/40">
           <button
             type="button"

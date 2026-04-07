@@ -1,0 +1,38 @@
+# Environments and Secrets
+.env
+.env.*
+.venv/
+venv/
+env/
+
+# Databases and Large Data
+data/
+exports/
+*.duckdb
+*.parquet
+*.csv
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# Frontend and Node artifacts
+node_modules/
+dist/
+.cache/
+.vite/
+vite.config.js.timestamp-*
+
+# Deployment and Logs
+logs/
+*.log
+airflow_home/
+
+# System Junk
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+Desktop.ini

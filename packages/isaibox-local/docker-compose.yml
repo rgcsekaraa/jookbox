@@ -1,0 +1,19 @@
+services:
+  isaibox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: isaibox-local
+    environment:
+      ISAIBOX_LOCAL_MODE: "1"
+      ISAIBOX_HOST: "0.0.0.0"
+      ISAIBOX_PORT: "8000"
+      ISAIBOX_LOG_LEVEL: "info"
+      ISAIBOX_CACHE_LIMIT_GB: "${ISAIBOX_CACHE_LIMIT_GB:-20}"
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - ./app/data:/app/data
+      - ./app/exports:/app/exports
+      - ./app/.cache:/app/.cache
+    restart: unless-stopped
