@@ -17,6 +17,18 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
+mkdir -p app/data app/exports app/.cache/audio
+
+if [ ! -f app/data/masstamilan.duckdb ]; then
+  echo "Missing packaged database: app/data/masstamilan.duckdb"
+  exit 1
+fi
+
+if [ ! -f app/dist/index.html ]; then
+  echo "Missing packaged frontend build: app/dist/index.html"
+  exit 1
+fi
+
 docker compose up -d --build
 
 echo "Waiting for frontend on http://127.0.0.1:${APP_PORT} ..."

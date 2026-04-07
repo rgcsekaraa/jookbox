@@ -18,6 +18,22 @@ if exist .env (
   )
 )
 
+if not exist app\data mkdir app\data
+if not exist app\exports mkdir app\exports
+if not exist app\.cache\audio mkdir app\.cache\audio
+
+if not exist app\data\masstamilan.duckdb (
+  echo Missing packaged database: app\data\masstamilan.duckdb
+  pause
+  exit /b 1
+)
+
+if not exist app\dist\index.html (
+  echo Missing packaged frontend build: app\dist\index.html
+  pause
+  exit /b 1
+)
+
 docker compose up -d --build
 echo Waiting for isaibox on http://127.0.0.1:%APP_PORT% ...
 set READY=0
