@@ -638,6 +638,23 @@ def remove_song_from_playlist(playlist_id: str, song_id: str):
     return json_response({"ok": True})
 
 
+@app.delete("/api/playlists/<playlist_id>/songs")
+def clear_playlist(playlist_id: str):
+    user, error_response = require_session_user()
+    if error_response:
+        return error_response
+    with db.get_conn() as conn:
+        playlist = conn.execute(
+            "SELECT playlist_id, is_global, user_id FROM playlists WHERE playlist_id = ?",
+            [playlist_id],
+        ).fetchone()
+        if not playlist or (playlist[1] and not user["is_admin"]) or (not playlist[1] and playlist[2] != user["user_id"]):
+            return json_response({"ok": False, "message": "Playlist not found"}), 404
+        conn.execute("DELETE FROM playlist_songs WHERE playlist_id = ?", [playlist_id])
+        conn.execute("UPDATE playlists SET updated_at = ? WHERE playlist_id = ?", [now_utc(), playlist_id])
+    return json_response({"ok": True})
+
+
 @app.delete("/api/playlists/<playlist_id>")
 def delete_playlist(playlist_id: str):
     user, error_response = require_session_user()
