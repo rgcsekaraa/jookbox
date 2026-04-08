@@ -391,6 +391,10 @@ function App() {
   const [pendingPlaylistSongId, setPendingPlaylistSongId] = createSignal("");
   const [appOffline, setAppOffline] = createSignal(false);
   const [offlineMessage, setOfflineMessage] = createSignal("");
+  const [cacheStatus, setCacheStatus] = createSignal(null);
+  const [cacheTrimming, setCacheTrimming] = createSignal(false);
+  const [cacheMessage, setCacheMessage] = createSignal("");
+  const [showSettings, setShowSettings] = createSignal(false);
   const [dbSyncState, setDbSyncState] = createSignal(null);
   const [configReady, setConfigReady] = createSignal(false);
 
@@ -414,7 +418,9 @@ function App() {
   let loadingTimer;
   let radioSyncTimer;
   let healthPollTimer;
+  let cachePollTimer;
   let dbSyncPollTimer;
+  let healthFailCount = 0;
   let crossfadeFrame;
   let themeMediaQuery;
   let syncSystemTheme;
@@ -424,6 +430,14 @@ function App() {
   let fadingAudio = null;
   const prefetchedIds = new Set();
   const rowRefs = new Map();
+
+  const cachePercent = createMemo(() => {
+    const status = cacheStatus();
+    if (!status || !status.limitBytes) return 0;
+    return Math.min(100, Math.round((status.usageBytes / status.limitBytes) * 100));
+  });
+  const cacheNearFull = createMemo(() => cachePercent() >= 80);
+  const cacheFull = createMemo(() => cachePercent() >= 95);
 
   const easeOutQuint = (value) => 1 - (1 - value) ** 5;
   const authEnabled = createMemo(() => configReady() && !localMode());
@@ -582,28 +596,79 @@ function App() {
 
   const verifyAppOnline = async () => {
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      markAppOffline("App is offline. Please check your internet connection or restart Docker.");
+      healthFailCount = 3;
+      markAppOffline("No internet connection detected.");
       return false;
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await fetch("/api/health", {
         cache: "no-store",
         signal: controller.signal,
       });
       if (!response.ok) {
-        markAppOffline("App is offline. Please check your internet connection or restart Docker.");
+        healthFailCount++;
+        if (healthFailCount >= 3) {
+          markAppOffline("Backend is not responding. Docker may need a restart.");
+        }
         return false;
       }
-      markAppOnline();
+      if (healthFailCount > 0) {
+        healthFailCount = 0;
+      }
+      if (appOffline()) {
+        markAppOnline();
+      }
       return true;
     } catch {
-      markAppOffline("App is offline. Please check your internet connection or restart Docker.");
+      healthFailCount++;
+      if (healthFailCount >= 3) {
+        markAppOffline("Backend is not responding. Docker may need a restart.");
+      }
       return false;
     } finally {
       clearTimeout(timeoutId);
+    }
+  };
+
+  const refreshCacheStatus = async () => {
+    if (!localMode()) return;
+    try {
+      const response = await fetch("/api/cache/status", { cache: "no-store" });
+      if (response.ok) {
+        const payload = await response.json();
+        setCacheStatus(payload);
+      }
+    } catch {}
+  };
+
+  const trimCache = async (force = false) => {
+    setCacheTrimming(true);
+    setCacheMessage("");
+    try {
+      const response = await fetch("/api/cache/trim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setCacheMessage(payload.message || "Unable to clear cache");
+        return;
+      }
+      const removedMb = (payload.removedBytes / (1024 * 1024)).toFixed(1);
+      setCacheMessage(
+        payload.removedFiles > 0
+          ? `Cleared ${payload.removedFiles} files (${removedMb} MB)`
+          : "Cache is already within limits"
+      );
+      await refreshCacheStatus();
+    } catch (err) {
+      setCacheMessage(err?.message || "Unable to clear cache");
+    } finally {
+      setCacheTrimming(false);
     }
   };
 
@@ -2536,7 +2601,8 @@ function App() {
       void verifyAppOnline();
     };
     const onBrowserOffline = () => {
-      markAppOffline("App is offline. Please check your internet connection or restart Docker.");
+      healthFailCount = 3;
+      markAppOffline("No internet connection detected.");
     };
     window.addEventListener("online", onBrowserOnline);
     window.addEventListener("offline", onBrowserOffline);
@@ -2549,7 +2615,7 @@ function App() {
     clearInterval(healthPollTimer);
     healthPollTimer = setInterval(() => {
       void verifyAppOnline();
-    }, 15000);
+    }, 30000);
 
     try {
       const [configResponse, statsResponse, songsResponse] = await Promise.all([
@@ -2596,6 +2662,9 @@ function App() {
       }
       if (Boolean(configPayload.localMode)) {
         await refreshDbSyncStatus();
+        void refreshCacheStatus();
+        clearInterval(cachePollTimer);
+        cachePollTimer = setInterval(() => void refreshCacheStatus(), 60000);
       }
       await refreshAccountState();
       if (radioEnabled()) {
@@ -2864,11 +2933,35 @@ function App() {
   });
 
   return (
-    <main class={`relative flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--bg)] text-[var(--fg)] ${appOffline() ? "pointer-events-none select-none opacity-60" : ""}`}>
+    <main class={`relative flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--bg)] text-[var(--fg)] ${appOffline() ? "select-none opacity-60" : ""}`}>
       <Show when={appOffline()}>
-        <div class="pointer-events-none absolute inset-x-0 top-0 z-[80] border-b border-[var(--line)] bg-[var(--bg)]/95 px-6 py-3 backdrop-blur">
+        <div class="pointer-events-auto absolute inset-x-0 top-0 z-[80] border-b border-[var(--line)] bg-[var(--bg)]/95 px-6 py-3 backdrop-blur">
           <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--fg)]">Offline</div>
-          <div class="mt-1 text-sm text-[var(--soft)]">{offlineMessage() || "App is offline. Please check your internet connection or restart Docker."}</div>
+          <div class="mt-1 text-sm text-[var(--soft)]">{offlineMessage() || "Backend is not responding. Docker may need a restart."}</div>
+          <button
+            type="button"
+            onClick={() => { healthFailCount = 0; markAppOnline(); void verifyAppOnline(); }}
+            class="mt-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--fg)] underline transition hover:text-[var(--soft)]"
+          >
+            Retry now
+          </button>
+        </div>
+      </Show>
+      <Show when={!appOffline() && localMode() && cacheFull()}>
+        <div class="border-b border-[var(--line)] bg-[var(--bg)] px-6 py-2">
+          <div class="flex items-center justify-between gap-4">
+            <div class="text-sm text-[var(--soft)]">
+              Cache is {cachePercent()}% full ({((cacheStatus()?.usageBytes || 0) / (1024 * 1024 * 1024)).toFixed(1)} / {cacheStatus()?.limitGb || 0} GB). Old songs will be removed automatically.
+            </div>
+            <button
+              type="button"
+              onClick={() => void trimCache(false)}
+              disabled={cacheTrimming()}
+              class="shrink-0 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--fg)] transition hover:text-[var(--soft)] disabled:opacity-50"
+            >
+              {cacheTrimming() ? "Clearing..." : "Clear now"}
+            </button>
+          </div>
         </div>
       </Show>
       <header class="flex min-w-0 flex-wrap items-center gap-3 border-b border-[var(--line)] px-6 py-4 sm:flex-nowrap sm:justify-between">
@@ -2899,9 +2992,20 @@ function App() {
           />
           <Show when={localMode()}>
             <div class="flex min-w-0 items-center gap-2">
-              <span class="rounded-full border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
-                Local library
-              </span>
+              <button
+                type="button"
+                onClick={() => setShowSettings(!showSettings())}
+                class={`rounded-full border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] transition ${
+                  showSettings() ? "border-[var(--fg)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)]"
+                }`}
+              >
+                Settings
+              </button>
+              <Show when={cacheNearFull() && !cacheFull()}>
+                <span class="rounded-full border border-yellow-500/40 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-yellow-500">
+                  Cache {cachePercent()}%
+                </span>
+              </Show>
               <Show when={localDbSyncLabel()}>
                 <span
                   class={`max-w-[220px] truncate rounded-full border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] ${localDbSyncTone()}`}
@@ -3050,6 +3154,76 @@ function App() {
           </Show>
         </div>
       </header>
+
+      <Show when={showSettings() && localMode()}>
+        <section class="border-b border-[var(--line)] bg-[var(--panel)] px-6 py-4">
+          <div class="flex items-center justify-between gap-4">
+            <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Settings</div>
+            <button
+              type="button"
+              onClick={() => setShowSettings(false)}
+              class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+            >
+              Close
+            </button>
+          </div>
+          <div class="mt-4 space-y-4">
+            <div class="border border-[var(--line)] p-4">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <div class="text-sm font-semibold">Audio cache</div>
+                  <div class="mt-1 text-sm text-[var(--soft)]">
+                    <Show when={cacheStatus()} fallback="Loading cache info...">
+                      {(() => {
+                        const usageMb = () => ((cacheStatus()?.usageBytes || 0) / (1024 * 1024)).toFixed(0);
+                        const usageGb = () => ((cacheStatus()?.usageBytes || 0) / (1024 * 1024 * 1024)).toFixed(2);
+                        const limitGb = () => cacheStatus()?.limitGb || 0;
+                        return (
+                          <span>
+                            {Number(usageMb()) > 1024 ? `${usageGb()} GB` : `${usageMb()} MB`} used of {limitGb()} GB limit ({cachePercent()}%)
+                          </span>
+                        );
+                      })()}
+                    </Show>
+                  </div>
+                  <Show when={cacheStatus()}>
+                    <div class="mt-2 h-2 w-full max-w-[300px] overflow-hidden rounded-full bg-[var(--line)]">
+                      <div
+                        class={`h-full rounded-full transition-all ${cacheFull() ? "bg-red-500" : cacheNearFull() ? "bg-yellow-500" : "bg-green-500"}`}
+                        style={`width: ${cachePercent()}%`}
+                      />
+                    </div>
+                  </Show>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void trimCache(false)}
+                    disabled={cacheTrimming()}
+                    class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)] disabled:opacity-50"
+                  >
+                    {cacheTrimming() ? "Clearing..." : "Smart clear"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void trimCache(true)}
+                    disabled={cacheTrimming()}
+                    class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)] disabled:opacity-50"
+                  >
+                    {cacheTrimming() ? "Clearing..." : "Clear all"}
+                  </button>
+                </div>
+              </div>
+              <Show when={cacheMessage()}>
+                <div class="mt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">{cacheMessage()}</div>
+              </Show>
+              <div class="mt-3 text-xs text-[var(--muted)]">
+                Smart clear removes oldest cached songs to stay within the limit. Clear all removes every cached file.
+              </div>
+            </div>
+          </div>
+        </section>
+      </Show>
 
       <section class="border-b border-[var(--line)] px-6 py-3">
         <div class="flex flex-wrap items-center justify-between gap-4">
