@@ -3674,224 +3674,193 @@ function App() {
           </section>
         </Show>
         <Show when={mainTab() === "playlists"}>
-          <section class="border-b border-[var(--line-soft)] px-6 py-4">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlists</div>
-                <div class="mt-1 text-sm text-[var(--soft)]">Create and manage your playlists.</div>
-              </div>
-              <div class="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
-                <span>{playlists().length} playlists</span>
-              </div>
-            </div>
-          </section>
-          <section class="min-h-0 flex-1 overflow-hidden px-6 py-4">
-            <div class="grid h-full min-h-0 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside class="min-h-0 overflow-y-auto border border-[var(--line)] bg-[var(--panel)] p-4">
-                <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlists</div>
-
-                <div class="mt-4 flex items-center gap-2">
-                  <input
-                    value={playlistNameInput()}
-                    onInput={(event) => setPlaylistNameInput(event.currentTarget.value)}
-                    placeholder="New playlist"
-                    class="min-w-0 flex-1 border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void createPlaylist()}
-                    class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
-                  >
-                    Create
-                  </button>
-                </div>
-
-                <div class="mt-5 space-y-5">
+          {(() => {
+            const userPlaylistIds = createMemo(() => new Set(playlists().map((p) => p.id)));
+            const myPlaylistDetail = createMemo(() => {
+              const detail = globalPlaylistDetail();
+              if (!detail) return null;
+              return userPlaylistIds().has(detail.id) ? detail : null;
+            });
+            return (
+              <>
+              <section class="border-b border-[var(--line-soft)] px-6 py-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <input
-                      value={playlistSearchQuery()}
-                      onInput={(event) => setPlaylistSearchQuery(event.currentTarget.value)}
-                      placeholder="Search playlists"
-                      class="w-full border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
-                    />
+                    <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">My playlists</div>
+                    <div class="mt-1 text-sm text-[var(--soft)]">Create and manage your playlists.</div>
                   </div>
+                  <div class="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+                    <span>{playlists().length} playlists</span>
+                  </div>
+                </div>
+              </section>
+              <section class="min-h-0 flex-1 overflow-hidden px-6 py-4">
+                <div class="grid h-full min-h-0 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+                  <aside class="min-h-0 overflow-y-auto border border-[var(--line)] bg-[var(--panel)] p-4">
+                    <div class="flex items-center gap-2">
+                      <input
+                        value={playlistNameInput()}
+                        onInput={(event) => setPlaylistNameInput(event.currentTarget.value)}
+                        onKeyDown={(event) => { if (event.key === "Enter") void createPlaylist(); }}
+                        placeholder="New playlist name"
+                        class="min-w-0 flex-1 border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void createPlaylist()}
+                        class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                      >
+                        +
+                      </button>
+                    </div>
 
-                  <Show when={filteredUserPlaylists().length > 0}>
-                    <div class="grid grid-cols-2 gap-2">
+                    <Show when={playlists().length > 3}>
+                      <div class="mt-3">
+                        <input
+                          value={playlistSearchQuery()}
+                          onInput={(event) => setPlaylistSearchQuery(event.currentTarget.value)}
+                          placeholder="Search"
+                          class="w-full border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
+                        />
+                      </div>
+                    </Show>
+
+                    <div class="mt-4 space-y-1">
                       <For each={filteredUserPlaylists()}>
                         {(playlist) => (
                           <button
                             type="button"
                             onClick={() => void openGlobalPlaylist(playlist.id)}
-                            class={`border p-3 text-left transition ${
-                              selectedGlobalPlaylistTarget() === playlist.id
+                            class={`flex w-full items-center justify-between gap-2 border px-3 py-3 text-left transition ${
+                              myPlaylistDetail()?.id === playlist.id
                                 ? "border-[var(--fg)] bg-[var(--hover)]"
                                 : "border-[var(--line)] hover:border-[var(--fg)]"
                             }`}
                           >
-                            <div class="line-clamp-2 text-sm">{playlist.name}</div>
-                            <div class="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--soft)]">{playlist.trackCount} tracks</div>
+                            <span class="min-w-0 truncate text-sm">{playlist.name}</span>
+                            <span class="shrink-0 font-mono text-[10px] text-[var(--soft)]">{playlist.trackCount}</span>
                           </button>
                         )}
                       </For>
-                    </div>
-                  </Show>
 
-                  <Show when={normalizedPlaylistSearch() && filteredUserPlaylists().length === 0}>
-                    <div class="border border-[var(--line)] px-3 py-4 text-sm text-[var(--soft)]">
-                      No playlists match that search.
-                    </div>
-                  </Show>
-
-                  <Show when={!normalizedPlaylistSearch() && playlists().length === 0}>
-                    <div class="border border-[var(--line)] px-3 py-4 text-sm text-[var(--soft)]">
-                      No playlists yet. Create one above.
-                    </div>
-                  </Show>
-                </div>
-              </aside>
-
-              <div class="flex min-h-0 flex-col overflow-hidden border border-[var(--line)] bg-[var(--panel)]">
-                <Show when={playlistDetailLoading() && !globalPlaylistDetail()}>
-                  <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-                    <div>
-                      <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
-                      <div class="mt-3 text-sm text-[var(--soft)]">Loading{loadingDots()}</div>
-                    </div>
-                  </div>
-                </Show>
-                <Show when={!playlistDetailLoading() && playlistDetailError() && !globalPlaylistDetail()}>
-                  <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-                    <div>
-                      <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
-                      <div class="mt-3 text-sm text-[var(--soft)]">{playlistDetailError()}</div>
-                    </div>
-                  </div>
-                </Show>
-                <Show when={globalPlaylistDetail()}>
-                  {(playlist) => (
-                    <>
-                      <section class="border-b border-[var(--line-soft)] px-4 py-4">
-                        <div class="flex items-center justify-between gap-4">
-                          <div class="min-w-0">
-                            <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
-                            <div class="mt-2 text-lg font-semibold">{playlist().name}</div>
-                            <div class="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">
-                              {playlist().source || "manual"} · {(playlist().tracks || []).length} tracks
-                            </div>
-                          </div>
-                          <div class="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">
-                            <input
-                              value={globalPlaylistNameEdit()}
-                              onInput={(event) => setGlobalPlaylistNameEdit(event.currentTarget.value)}
-                              placeholder="Rename"
-                              class="min-w-[140px] border border-[var(--line)] bg-transparent px-2 py-1 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => void renamePlaylistLocal()}
-                              class="transition hover:text-[var(--fg)]"
-                            >
-                              Rename
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void clearVisiblePlaylist()}
-                              class="transition hover:text-[var(--fg)]"
-                            >
-                              Clear
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void deleteVisiblePlaylist()}
-                              class="transition hover:text-[var(--fg)]"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      </section>
-                      <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-4 py-2">
-                        <span class="w-8 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">#</span>
-                        <span class="min-w-0 flex-[1.4] font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Song Name</span>
-                        <span class="hidden min-w-0 flex-1 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] md:block">Movie</span>
-                        <span class="hidden min-w-0 flex-1 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] lg:block">Music Director</span>
-                        <span class="w-20 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Year</span>
-                        <span class="w-16 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Remove</span>
-                      </div>
-                      <Show
-                        when={(playlist().tracks || []).length > 0}
-                        fallback={
-                          <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-                            <div class="text-sm text-[var(--soft)]">No songs in this playlist yet. Play a song and use the + button to add it.</div>
-                          </div>
-                        }
-                      >
-                        <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-                          <For each={playlist().tracks || []}>
-                            {(track, index) => {
-                              const active = () => selectedSong()?.id === track.id;
-                              return (
-                              <li>
-                                <button
-                                  ref={(el) => {
-                                    if (el) {
-                                      rowRefs.set(track.id, el);
-                                    } else {
-                                      rowRefs.delete(track.id);
-                                    }
-                                  }}
-                                  type="button"
-                                  onClick={() => loadSong(track, true)}
-                                  class={`flex w-full items-center gap-4 px-4 py-3 text-left transition ${
-                                    active()
-                                      ? currentTrackId() === track.id
-                                        ? "song-row-active text-[var(--fg)]"
-                                        : "bg-[var(--hover)] text-[var(--fg)]"
-                                      : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
-                                  }`}
-                                >
-                                  <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
-                                    {currentTrackId() === track.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
-                                  </span>
-                                  <span class="min-w-0 flex-[1.4] truncate text-sm">{track.track}</span>
-                                  <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] md:block">{track.movie || "-"}</span>
-                                  <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] lg:block">{track.musicDirector || "-"}</span>
-                                  <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{track.year || "-"}</span>
-                                  <span class="flex w-16 justify-end">
-                                    <span
-                                      role="button"
-                                      tabindex="-1"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        void removeSongFromPlaylist(playlist().id, track.id);
-                                      }}
-                                      class="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)] transition hover:text-[var(--fg)]"
-                                    >
-                                      Remove
-                                    </span>
-                                  </span>
-                                </button>
-                              </li>
-                              );
-                            }}
-                          </For>
-                        </ul>
+                      <Show when={normalizedPlaylistSearch() && filteredUserPlaylists().length === 0}>
+                        <div class="px-1 py-3 text-sm text-[var(--soft)]">No match.</div>
                       </Show>
-                    </>
-                  )}
-                </Show>
-                <Show when={!playlistDetailLoading() && !globalPlaylistDetail() && !playlistDetailError()}>
-                  <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-                    <div>
-                      <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
-                      <div class="mt-3 text-sm text-[var(--soft)]">Select a playlist to view its tracks, or create a new one.</div>
+
+                      <Show when={!normalizedPlaylistSearch() && playlists().length === 0}>
+                        <div class="px-1 py-3 text-sm text-[var(--soft)]">No playlists yet.</div>
+                      </Show>
                     </div>
+                  </aside>
+
+                  <div class="flex min-h-0 flex-col overflow-hidden border border-[var(--line)] bg-[var(--panel)]">
+                    <Show when={playlistDetailLoading() && !myPlaylistDetail()}>
+                      <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+                        <div>
+                          <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
+                          <div class="mt-3 text-sm text-[var(--soft)]">Loading{loadingDots()}</div>
+                        </div>
+                      </div>
+                    </Show>
+                    <Show when={myPlaylistDetail()}>
+                      {(playlist) => (
+                        <>
+                          <section class="border-b border-[var(--line-soft)] px-4 py-4">
+                            <div class="flex items-center justify-between gap-4">
+                              <div class="min-w-0">
+                                <div class="mt-1 text-lg font-semibold">{playlist().name}</div>
+                                <div class="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">
+                                  {(playlist().tracks || []).length} tracks
+                                </div>
+                              </div>
+                              <div class="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">
+                                <input
+                                  value={globalPlaylistNameEdit()}
+                                  onInput={(event) => setGlobalPlaylistNameEdit(event.currentTarget.value)}
+                                  onKeyDown={(event) => { if (event.key === "Enter") void renamePlaylistLocal(); }}
+                                  placeholder="Rename"
+                                  class="min-w-[120px] border border-[var(--line)] bg-transparent px-2 py-1 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
+                                />
+                                <button type="button" onClick={() => void renamePlaylistLocal()} class="transition hover:text-[var(--fg)]">Rename</button>
+                                <button type="button" onClick={() => void clearVisiblePlaylist()} class="transition hover:text-[var(--fg)]">Clear</button>
+                                <button type="button" onClick={() => void deleteVisiblePlaylist()} class="transition hover:text-[var(--fg)]">Delete</button>
+                              </div>
+                            </div>
+                          </section>
+                          <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-4 py-2">
+                            <span class="w-8 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">#</span>
+                            <span class="min-w-0 flex-[1.4] font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Track</span>
+                            <span class="hidden min-w-0 flex-1 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] md:block">Movie</span>
+                            <span class="hidden min-w-0 flex-1 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] lg:block">Music Director</span>
+                            <span class="w-20 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Year</span>
+                            <span class="w-16 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]"></span>
+                          </div>
+                          <Show
+                            when={(playlist().tracks || []).length > 0}
+                            fallback={
+                              <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+                                <div class="text-sm text-[var(--soft)]">Empty playlist. Play a song from Library and add it here.</div>
+                              </div>
+                            }
+                          >
+                            <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+                              <For each={playlist().tracks || []}>
+                                {(track, index) => {
+                                  const active = () => selectedSong()?.id === track.id;
+                                  return (
+                                  <li>
+                                    <button
+                                      ref={(el) => { if (el) { rowRefs.set(track.id, el); } else { rowRefs.delete(track.id); } }}
+                                      type="button"
+                                      onClick={() => loadSong(track, true)}
+                                      class={`flex w-full items-center gap-4 px-4 py-3 text-left transition ${
+                                        active()
+                                          ? currentTrackId() === track.id
+                                            ? "song-row-active text-[var(--fg)]"
+                                            : "bg-[var(--hover)] text-[var(--fg)]"
+                                          : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
+                                      }`}
+                                    >
+                                      <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
+                                        {currentTrackId() === track.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
+                                      </span>
+                                      <span class="min-w-0 flex-[1.4] truncate text-sm">{track.track}</span>
+                                      <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] md:block">{track.movie || "-"}</span>
+                                      <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] lg:block">{track.musicDirector || "-"}</span>
+                                      <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{track.year || "-"}</span>
+                                      <span class="flex w-16 justify-end">
+                                        <span
+                                          role="button"
+                                          tabindex="-1"
+                                          onClick={(event) => { event.stopPropagation(); void removeSongFromPlaylist(playlist().id, track.id); }}
+                                          class="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)] transition hover:text-[var(--fg)]"
+                                        >
+                                          Remove
+                                        </span>
+                                      </span>
+                                    </button>
+                                  </li>
+                                  );
+                                }}
+                              </For>
+                            </ul>
+                          </Show>
+                        </>
+                      )}
+                    </Show>
+                    <Show when={!playlistDetailLoading() && !myPlaylistDetail()}>
+                      <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+                        <div class="text-sm text-[var(--soft)]">
+                          {playlists().length > 0 ? "Select a playlist to view its songs." : "Create a playlist to get started."}
+                        </div>
+                      </div>
+                    </Show>
                   </div>
-                </Show>
-              </div>
-            </div>
-          </section>
+                </div>
+              </section>
+              </>
+            );
+          })()}
         </Show>
         <Show when={mainTab() === "library"}>
           <section class="min-h-0 flex-1 overflow-hidden px-6 py-4">
