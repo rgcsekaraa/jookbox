@@ -688,6 +688,9 @@ function App() {
     if (mainTab() === "admin") {
       return [];
     }
+    if (mainTab() === "playlists") {
+      return globalPlaylistDetail()?.tracks || [];
+    }
     if (mainTab() === "library" && showPlaylistDetail()) {
       return globalPlaylistDetail()?.tracks || [];
     }
@@ -752,6 +755,9 @@ function App() {
   };
   const activateMainTabShortcut = (tab) => {
     if (tab === "admin" && !user()?.is_admin) {
+      return;
+    }
+    if (tab === "playlists" && !localMode()) {
       return;
     }
     if (tab === "radio" && !radioEnabled()) {
@@ -962,7 +968,7 @@ function App() {
       tab = "library";
     }
     setMainTab(tab);
-    if (tab === "admin") {
+    if (tab === "admin" || tab === "playlists") {
       return;
     }
     if (tab === "radio" && !radioQueue().length && songs().length) {
@@ -1934,6 +1940,25 @@ function App() {
     setAccountMessage("Playlist deleted");
   };
 
+  const renamePlaylistLocal = async () => {
+    if (!user() || !globalPlaylistDetail()) {
+      return;
+    }
+    const response = await fetch(`/api/playlists/${globalPlaylistDetail().id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: globalPlaylistNameEdit().trim() }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setAccountMessage(payload.message || "Unable to rename playlist");
+      return;
+    }
+    await refreshAccountState();
+    await openGlobalPlaylist(globalPlaylistDetail().id);
+    setAccountMessage("Playlist renamed");
+  };
+
   const renameGlobalPlaylist = async () => {
     if (!user()?.is_admin || !globalPlaylistDetail()) {
       return;
@@ -2381,13 +2406,14 @@ function App() {
         }
       }
 
-      if (commandKey && ["1", "2", "3", "4", "5"].includes(event.key)) {
+      if (commandKey && ["1", "2", "3", "4", "5", "6"].includes(event.key)) {
         event.preventDefault();
         if (event.key === "1") activateMainTabShortcut("library");
         if (event.key === "2") activateMainTabShortcut("recents");
         if (event.key === "3") activateMainTabShortcut("favorites");
-        if (event.key === "4" && radioEnabled()) activateMainTabShortcut("radio");
-        if (event.key === "5") activateMainTabShortcut("admin");
+        if (event.key === "4") activateMainTabShortcut("playlists");
+        if (event.key === "5" && radioEnabled()) activateMainTabShortcut("radio");
+        if (event.key === "6") activateMainTabShortcut("admin");
         return;
       }
 
@@ -3044,6 +3070,11 @@ function App() {
                 Radio
               </button>
             </Show>
+            <Show when={localMode()}>
+              <button type="button" onClick={() => setMainBrowseTab("playlists")} class={`px-1 py-1 ${mainTab() === "playlists" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
+                Playlists
+              </button>
+            </Show>
             <Show when={authEnabled() && user()?.is_admin}>
               <button type="button" onClick={() => setMainBrowseTab("admin")} class={`px-1 py-1 ${mainTab() === "admin" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
                 Admin
@@ -3490,9 +3521,12 @@ function App() {
                   <Show when={libraryProfileEnabled()}>
                     <div class="flex items-center justify-between gap-4"><span>Favorites</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+3</span></div>
                   </Show>
-                  <div class="flex items-center justify-between gap-4"><span>Radio</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+4 or R</span></div>
+                  <Show when={localMode()}>
+                    <div class="flex items-center justify-between gap-4"><span>Playlists</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+4</span></div>
+                  </Show>
+                  <div class="flex items-center justify-between gap-4"><span>Radio</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+5 or R</span></div>
                   <Show when={authEnabled() && user()?.is_admin}>
-                    <div class="flex items-center justify-between gap-4"><span>Admin</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+5</span></div>
+                    <div class="flex items-center justify-between gap-4"><span>Admin</span><span class="font-mono text-[11px] text-[var(--soft)]">Cmd/Ctrl+6</span></div>
                   </Show>
                 </div>
                 <div class="space-y-3">
@@ -3513,7 +3547,7 @@ function App() {
             </div>
           </div>
         </Show>
-        <Show when={mainTab() !== "library" && mainTab() !== "admin"}>
+        <Show when={mainTab() !== "library" && mainTab() !== "admin" && mainTab() !== "playlists"}>
           <section class="border-b border-[var(--line-soft)] px-6 py-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -3636,6 +3670,247 @@ function App() {
                   No radio stations match that search.
                 </div>
               </Show>
+            </div>
+          </section>
+        </Show>
+        <Show when={mainTab() === "playlists"}>
+          <section class="border-b border-[var(--line-soft)] px-6 py-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlists</div>
+                <div class="mt-1 text-sm text-[var(--soft)]">Create and manage your playlists.</div>
+              </div>
+              <div class="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+                <span>{[...playlists(), ...globalPlaylists()].length} playlists</span>
+              </div>
+            </div>
+          </section>
+          <section class="min-h-0 flex-1 overflow-hidden px-6 py-4">
+            <div class="grid h-full min-h-0 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <aside class="min-h-0 overflow-y-auto border border-[var(--line)] bg-[var(--panel)] p-4">
+                <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlists</div>
+
+                <div class="mt-4 flex items-center gap-2">
+                  <input
+                    value={playlistNameInput()}
+                    onInput={(event) => setPlaylistNameInput(event.currentTarget.value)}
+                    placeholder="New playlist"
+                    class="min-w-0 flex-1 border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void createPlaylist()}
+                    class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                  >
+                    Create
+                  </button>
+                </div>
+
+                <div class="mt-5 space-y-5">
+                  <div>
+                    <input
+                      value={playlistSearchQuery()}
+                      onInput={(event) => setPlaylistSearchQuery(event.currentTarget.value)}
+                      placeholder="Search playlists"
+                      class="w-full border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
+                    />
+                  </div>
+
+                  <Show when={filteredUserPlaylists().length > 0}>
+                    <div>
+                      <div class="mb-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Yours</div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <For each={filteredUserPlaylists()}>
+                          {(playlist) => (
+                            <button
+                              type="button"
+                              onClick={() => void openGlobalPlaylist(playlist.id)}
+                              class={`border p-3 text-left transition ${
+                                selectedGlobalPlaylistTarget() === playlist.id
+                                  ? "border-[var(--fg)] bg-[var(--hover)]"
+                                  : "border-[var(--line)] hover:border-[var(--fg)]"
+                              }`}
+                            >
+                              <div class="line-clamp-2 text-sm">{playlist.name}</div>
+                              <div class="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--soft)]">{playlist.trackCount} tracks</div>
+                            </button>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  </Show>
+
+                  <Show when={filteredGlobalPlaylists().length > 0}>
+                    <div>
+                      <div class="mb-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Global</div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <For each={filteredGlobalPlaylists()}>
+                          {(playlist) => (
+                            <button
+                              type="button"
+                              onClick={() => void openGlobalPlaylist(playlist.id)}
+                              class={`border p-3 text-left transition ${
+                                selectedGlobalPlaylistTarget() === playlist.id
+                                  ? "border-[var(--fg)] bg-[var(--hover)]"
+                                  : "border-[var(--line)] hover:border-[var(--fg)]"
+                              }`}
+                            >
+                              <div class="line-clamp-2 text-sm">{playlist.name}</div>
+                              <div class="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--soft)]">{playlist.trackCount} tracks</div>
+                            </button>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  </Show>
+
+                  <Show when={normalizedPlaylistSearch() && filteredUserPlaylists().length === 0 && filteredGlobalPlaylists().length === 0}>
+                    <div class="border border-[var(--line)] px-3 py-4 text-sm text-[var(--soft)]">
+                      No playlists match that search.
+                    </div>
+                  </Show>
+                </div>
+              </aside>
+
+              <div class="flex min-h-0 flex-col overflow-hidden border border-[var(--line)] bg-[var(--panel)]">
+                <Show when={playlistDetailLoading() && !globalPlaylistDetail()}>
+                  <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+                    <div>
+                      <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
+                      <div class="mt-3 text-sm text-[var(--soft)]">Loading{loadingDots()}</div>
+                    </div>
+                  </div>
+                </Show>
+                <Show when={!playlistDetailLoading() && playlistDetailError() && !globalPlaylistDetail()}>
+                  <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+                    <div>
+                      <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
+                      <div class="mt-3 text-sm text-[var(--soft)]">{playlistDetailError()}</div>
+                    </div>
+                  </div>
+                </Show>
+                <Show when={globalPlaylistDetail()}>
+                  {(playlist) => (
+                    <>
+                      <section class="border-b border-[var(--line-soft)] px-4 py-4">
+                        <div class="flex items-center justify-between gap-4">
+                          <div class="min-w-0">
+                            <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
+                            <div class="mt-2 text-lg font-semibold">{playlist().name}</div>
+                            <div class="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">
+                              {playlist().source || "manual"} · {(playlist().tracks || []).length} tracks
+                            </div>
+                          </div>
+                          <div class="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">
+                            <input
+                              value={globalPlaylistNameEdit()}
+                              onInput={(event) => setGlobalPlaylistNameEdit(event.currentTarget.value)}
+                              placeholder="Rename"
+                              class="min-w-[140px] border border-[var(--line)] bg-transparent px-2 py-1 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void renamePlaylistLocal()}
+                              class="transition hover:text-[var(--fg)]"
+                            >
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void clearVisiblePlaylist()}
+                              class="transition hover:text-[var(--fg)]"
+                            >
+                              Clear
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void deleteVisiblePlaylist()}
+                              class="transition hover:text-[var(--fg)]"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </section>
+                      <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-4 py-2">
+                        <span class="w-8 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">#</span>
+                        <span class="min-w-0 flex-[1.4] font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Song Name</span>
+                        <span class="hidden min-w-0 flex-1 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] md:block">Movie</span>
+                        <span class="hidden min-w-0 flex-1 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] lg:block">Music Director</span>
+                        <span class="w-20 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Year</span>
+                        <span class="w-16 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Remove</span>
+                      </div>
+                      <Show
+                        when={(playlist().tracks || []).length > 0}
+                        fallback={
+                          <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+                            <div class="text-sm text-[var(--soft)]">No songs in this playlist yet. Play a song and use the + button to add it.</div>
+                          </div>
+                        }
+                      >
+                        <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+                          <For each={playlist().tracks || []}>
+                            {(track, index) => {
+                              const active = () => selectedSong()?.id === track.id;
+                              return (
+                              <li>
+                                <button
+                                  ref={(el) => {
+                                    if (el) {
+                                      rowRefs.set(track.id, el);
+                                    } else {
+                                      rowRefs.delete(track.id);
+                                    }
+                                  }}
+                                  type="button"
+                                  onClick={() => loadSong(track, true)}
+                                  class={`flex w-full items-center gap-4 px-4 py-3 text-left transition ${
+                                    active()
+                                      ? currentTrackId() === track.id
+                                        ? "song-row-active text-[var(--fg)]"
+                                        : "bg-[var(--hover)] text-[var(--fg)]"
+                                      : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
+                                  }`}
+                                >
+                                  <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
+                                    {currentTrackId() === track.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
+                                  </span>
+                                  <span class="min-w-0 flex-[1.4] truncate text-sm">{track.track}</span>
+                                  <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] md:block">{track.movie || "-"}</span>
+                                  <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] lg:block">{track.musicDirector || "-"}</span>
+                                  <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{track.year || "-"}</span>
+                                  <span class="flex w-16 justify-end">
+                                    <span
+                                      role="button"
+                                      tabindex="-1"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void removeSongFromPlaylist(playlist().id, track.id);
+                                      }}
+                                      class="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)] transition hover:text-[var(--fg)]"
+                                    >
+                                      Remove
+                                    </span>
+                                  </span>
+                                </button>
+                              </li>
+                              );
+                            }}
+                          </For>
+                        </ul>
+                      </Show>
+                    </>
+                  )}
+                </Show>
+                <Show when={!playlistDetailLoading() && !globalPlaylistDetail() && !playlistDetailError()}>
+                  <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+                    <div>
+                      <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
+                      <div class="mt-3 text-sm text-[var(--soft)]">Select a playlist to view its tracks, or create a new one.</div>
+                    </div>
+                  </div>
+                </Show>
+              </div>
             </div>
           </section>
         </Show>
