@@ -2619,12 +2619,9 @@ def build_upstream_headers(song_id: str | None = None) -> dict[str, str]:
 def request_upstream(url: str, *, headers: dict[str, str], stream: bool, timeout: tuple[int, int]) -> tuple[requests.Response | None, str]:
     last_response: requests.Response | None = None
     last_source = "requests"
-    
+
     def cffi_get(url, **kwargs):
         from curl_cffi import requests as cffi_requests
-        # Convert requests-style stream=True to curl_cffi handling if needed
-        # curl_cffi handles streaming differently, but for simplicity here we use its synchronous interface
-        # note: curl_cffi response objects mimic requests enough for our is_playable check
         return cffi_requests.get(url, impersonate="chrome124", **kwargs)
 
     clients = (
@@ -2647,6 +2644,11 @@ def request_upstream(url: str, *, headers: dict[str, str], stream: bool, timeout
             continue
 
         if is_playable_upstream_response(response):
+            return response, source
+
+        # If upstream returned HTML, the URL is expired — stop trying other clients
+        content_type = response.headers.get("Content-Type", "")
+        if response.status_code == 200 and "text/html" in content_type:
             return response, source
 
         if last_response is not None:

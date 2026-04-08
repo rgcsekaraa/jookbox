@@ -417,10 +417,8 @@ function App() {
   let adminRefreshTimer;
   let loadingTimer;
   let radioSyncTimer;
-  let healthPollTimer;
   let cachePollTimer;
   let dbSyncPollTimer;
-  let healthFailCount = 0;
   let crossfadeFrame;
   let themeMediaQuery;
   let syncSystemTheme;
@@ -596,41 +594,13 @@ function App() {
 
   const verifyAppOnline = async () => {
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      healthFailCount = 3;
       markAppOffline("No internet connection detected.");
       return false;
     }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-    try {
-      const response = await fetch("/api/health", {
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        healthFailCount++;
-        if (healthFailCount >= 3) {
-          markAppOffline("Backend is not responding. Docker may need a restart.");
-        }
-        return false;
-      }
-      if (healthFailCount > 0) {
-        healthFailCount = 0;
-      }
-      if (appOffline()) {
-        markAppOnline();
-      }
-      return true;
-    } catch {
-      healthFailCount++;
-      if (healthFailCount >= 3) {
-        markAppOffline("Backend is not responding. Docker may need a restart.");
-      }
-      return false;
-    } finally {
-      clearTimeout(timeoutId);
+    if (appOffline()) {
+      markAppOnline();
     }
+    return true;
   };
 
   const refreshCacheStatus = async () => {
@@ -2601,7 +2571,6 @@ function App() {
       void verifyAppOnline();
     };
     const onBrowserOffline = () => {
-      healthFailCount = 3;
       markAppOffline("No internet connection detected.");
     };
     window.addEventListener("online", onBrowserOnline);
@@ -2612,10 +2581,6 @@ function App() {
     removeOfflineListener = () => window.removeEventListener("offline", onBrowserOffline);
 
     void verifyAppOnline();
-    clearInterval(healthPollTimer);
-    healthPollTimer = setInterval(() => {
-      void verifyAppOnline();
-    }, 30000);
 
     try {
       const [configResponse, statsResponse, songsResponse] = await Promise.all([
@@ -2940,10 +2905,10 @@ function App() {
           <div class="mt-1 text-sm text-[var(--soft)]">{offlineMessage() || "Backend is not responding. Docker may need a restart."}</div>
           <button
             type="button"
-            onClick={() => { healthFailCount = 0; markAppOnline(); void verifyAppOnline(); }}
+            onClick={() => { markAppOnline(); }}
             class="mt-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--fg)] underline transition hover:text-[var(--soft)]"
           >
-            Retry now
+            Dismiss
           </button>
         </div>
       </Show>
