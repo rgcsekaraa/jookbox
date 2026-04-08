@@ -56,6 +56,8 @@ const sanitizePlaylistName = (value) => String(value || "")
 
 const sanitizeSpotifyPlaylistUrl = (value) => String(value || "").replace(/\s+/g, "").trim();
 
+const normalizeText = (value) => String(value || "").trim().toLowerCase();
+
 const SONG_SORT_COLUMNS = {
   default: "#",
   track: "Song Name",
@@ -125,6 +127,29 @@ const SortableSongHeader = (props) => {
         <span class="ml-1 inline-block">{arrow()}</span>
       </Show>
     </button>
+  );
+};
+
+const DrilldownText = (props) => {
+  const value = () => String(props.value || "").trim();
+  return (
+    <span
+      role={value() ? "button" : undefined}
+      tabindex={value() ? "-1" : undefined}
+      onClick={(event) => {
+        if (!value()) {
+          return;
+        }
+        event.stopPropagation();
+        props.onClick?.(value());
+      }}
+      class={value()
+        ? `cursor-pointer truncate underline decoration-transparent underline-offset-4 transition hover:text-[var(--fg)] hover:decoration-current ${props.class || ""}`
+        : props.class || ""}
+      title={value() || undefined}
+    >
+      {value() || "-"}
+    </span>
   );
 };
 
@@ -414,6 +439,7 @@ function App() {
   const [repeatMode, setRepeatMode] = createSignal("off");
   const [movieFilter, setMovieFilter] = createSignal("");
   const [artistFilter, setArtistFilter] = createSignal("");
+  const [musicDirectorFilter, setMusicDirectorFilter] = createSignal("");
   const [autoplayNext, setAutoplayNext] = createSignal(true);
   const [themePreference, setThemePreference] = createSignal("system");
   const [systemTheme, setSystemTheme] = createSignal("dark");
@@ -481,6 +507,7 @@ function App() {
   const [configReady, setConfigReady] = createSignal(false);
   const [playlistMutationBusy, setPlaylistMutationBusy] = createSignal("");
   const [playlistCreateBusy, setPlaylistCreateBusy] = createSignal(false);
+  const [libraryNavStack, setLibraryNavStack] = createSignal([]);
   const [songSortByScope, setSongSortByScope] = createSignal({
     library: DEFAULT_SONG_SORT,
     library_playlist: DEFAULT_SONG_SORT,
@@ -536,7 +563,7 @@ function App() {
   const radioEnabled = createMemo(() => configReady() && !localMode());
   const spotifyEnabled = createMemo(() => authEnabled() && Boolean(spotifyClientId()));
   const visiblePlaylistDetail = createMemo(() => {
-    if (query().trim() || movieFilter() || artistFilter()) {
+    if (query().trim() || movieFilter() || artistFilter() || musicDirectorFilter()) {
       return null;
     }
     return globalPlaylistDetail();
@@ -782,10 +809,13 @@ function App() {
   const visibleResults = createMemo(() => {
     const resultSongs = results().songs || [];
     const filteredByAlbum = movieFilter() ? resultSongs.filter((song) => song.movie === movieFilter()) : resultSongs;
-    const filtered = artistFilter()
-      ? filteredByAlbum.filter((song) => (song.singers || "").toLowerCase().includes(artistFilter().toLowerCase()))
+    const filteredByArtist = artistFilter()
+      ? filteredByAlbum.filter((song) => normalizeText(song.singers).includes(normalizeText(artistFilter())))
       : filteredByAlbum;
-    return filtered.slice(0, 200);
+    const filteredByDirector = musicDirectorFilter()
+      ? filteredByArtist.filter((song) => normalizeText(song.musicDirector) === normalizeText(musicDirectorFilter()))
+      : filteredByArtist;
+    return filteredByDirector.slice(0, 200);
   });
   const visibleAlbums = createMemo(() => results().albums || []);
   const visibleArtists = createMemo(() => results().artists || []);
@@ -900,6 +930,67 @@ function App() {
     ...playlists().map((playlist) => ({ ...playlist, section: "Yours" })),
     ...globalPlaylists().map((playlist) => ({ ...playlist, section: "Global" })),
   ]);
+
+  const pushLibraryNavState = () => {
+    setLibraryNavStack((current) => [
+      ...current,
+      {
+        mainTab: mainTab(),
+        searchTab: searchTab(),
+        movieFilter: movieFilter(),
+        artistFilter: artistFilter(),
+        musicDirectorFilter: musicDirectorFilter(),
+        selectedGlobalPlaylistTarget: selectedGlobalPlaylistTarget(),
+      },
+    ]);
+  };
+
+  const navigateToMovie = (movie) => {
+    const nextMovie = String(movie || "").trim();
+    if (!nextMovie) {
+      return;
+    }
+    if (mainTab() === "library" && movieFilter() === nextMovie && !artistFilter() && !musicDirectorFilter()) {
+      return;
+    }
+    pushLibraryNavState();
+    setMainTab("library");
+    setSearchTab("songs");
+    setMovieFilter(nextMovie);
+    setArtistFilter("");
+    setMusicDirectorFilter("");
+  };
+
+  const navigateToMusicDirector = (musicDirector) => {
+    const nextDirector = String(musicDirector || "").trim();
+    if (!nextDirector) {
+      return;
+    }
+    if (mainTab() === "library" && musicDirectorFilter() === nextDirector && !movieFilter() && !artistFilter()) {
+      return;
+    }
+    pushLibraryNavState();
+    setMainTab("library");
+    setSearchTab("songs");
+    setMovieFilter("");
+    setArtistFilter("");
+    setMusicDirectorFilter(nextDirector);
+  };
+
+  const restorePreviousLibraryView = () => {
+    const history = libraryNavStack();
+    const previous = history[history.length - 1];
+    if (!previous) {
+      return;
+    }
+    setLibraryNavStack((current) => current.slice(0, -1));
+    setMainTab(previous.mainTab || "library");
+    setSearchTab(previous.searchTab || "songs");
+    setMovieFilter(previous.movieFilter || "");
+    setArtistFilter(previous.artistFilter || "");
+    setMusicDirectorFilter(previous.musicDirectorFilter || "");
+    setSelectedGlobalPlaylistTarget(previous.selectedGlobalPlaylistTarget || "");
+  };
   const playlistSummaryById = createMemo(() => {
     const map = new Map();
     for (const playlist of playlists()) {
@@ -2053,6 +2144,7 @@ function App() {
     setQuery("");
     setMovieFilter("");
     setArtistFilter("");
+    setMusicDirectorFilter("");
     setSearchTab("songs");
     setSelectedGlobalPlaylistTarget(playlistId);
     setPlaylistDetailError("");
@@ -2154,6 +2246,7 @@ function App() {
     setQuery("");
     setMovieFilter("");
     setArtistFilter("");
+    setMusicDirectorFilter("");
     setSearchTab("songs");
   };
 
@@ -2649,8 +2742,11 @@ function App() {
       if (movieFilter() && !event.data.payload.songs.some((song) => song.movie === movieFilter())) {
         setMovieFilter("");
       }
-      if (artistFilter() && !event.data.payload.songs.some((song) => (song.singers || "").toLowerCase().includes(artistFilter().toLowerCase()))) {
+      if (artistFilter() && !event.data.payload.songs.some((song) => normalizeText(song.singers).includes(normalizeText(artistFilter())))) {
         setArtistFilter("");
+      }
+      if (musicDirectorFilter() && !event.data.payload.songs.some((song) => normalizeText(song.musicDirector) === normalizeText(musicDirectorFilter()))) {
+        setMusicDirectorFilter("");
       }
     };
 
@@ -3530,6 +3626,7 @@ function App() {
                   onInput={(event) => {
                     setMovieFilter("");
                     setArtistFilter("");
+                    setMusicDirectorFilter("");
                     setQuery(event.currentTarget.value);
                   }}
                   placeholder="Search tracks, singers, albums..."
@@ -3540,6 +3637,7 @@ function App() {
                   onClick={() => {
                     setMovieFilter("");
                     setArtistFilter("");
+                    setMusicDirectorFilter("");
                     setQuery("");
                   }}
                   class="shrink-0 font-mono text-xs uppercase tracking-[0.2em] text-[var(--muted)] transition hover:text-[var(--fg)]"
@@ -4487,8 +4585,8 @@ function App() {
                                     {currentTrackId() === track.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
                                   </span>
                                   <span class="min-w-0 flex-[1.4] truncate text-sm">{track.track}</span>
-                                  <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] md:block">{track.movie || "-"}</span>
-                                  <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] lg:block">{track.musicDirector || "-"}</span>
+                                  <DrilldownText value={track.movie} onClick={navigateToMovie} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] md:block" />
+                                  <DrilldownText value={track.musicDirector} onClick={navigateToMusicDirector} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] lg:block" />
                                   <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] xl:block">{track.singers || "-"}</span>
                                   <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{track.year || "-"}</span>
                                   <Show when={canManageVisiblePlaylist()}>
@@ -4516,7 +4614,7 @@ function App() {
                     </>
                   )}
                 </Show>
-                <Show when={!playlistDetailLoading() && (!showPlaylistDetail() || query().trim() || movieFilter() || artistFilter()) && !playlistDetailError()}>
+                <Show when={!playlistDetailLoading() && (!showPlaylistDetail() || query().trim() || movieFilter() || artistFilter() || musicDirectorFilter()) && !playlistDetailError()}>
                 <section class="border-b border-[var(--line-soft)] px-4 py-3">
                   <div class="flex items-center gap-4 font-mono text-[10px] uppercase tracking-[0.22em]">
                     <button type="button" onClick={() => setSearchTab("songs")} class={searchTab() === "songs" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Songs</button>
@@ -4525,36 +4623,51 @@ function App() {
                   </div>
                 </section>
 
-                <Show when={query().trim() || movieFilter() || artistFilter()}>
+                <Show when={query().trim() || movieFilter() || artistFilter() || musicDirectorFilter()}>
                   <section class="border-b border-[var(--line-soft)] px-4 py-4">
                     <div class="flex items-center justify-between gap-4">
                       <div class="min-w-0">
                         <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
-                          {movieFilter() ? "Filtered by album" : artistFilter() ? "Filtered by artist" : "Search filters"}
+                          {movieFilter() ? "Filtered by album" : musicDirectorFilter() ? "Filtered by music director" : artistFilter() ? "Filtered by artist" : "Search filters"}
                         </div>
                         <Show when={movieFilter()}>
                           <div class="mt-1 truncate text-sm text-[var(--fg)]">{movieFilter()}</div>
                         </Show>
-                        <Show when={!movieFilter() && artistFilter()}>
+                        <Show when={!movieFilter() && musicDirectorFilter()}>
+                          <div class="mt-1 truncate text-sm text-[var(--fg)]">{musicDirectorFilter()}</div>
+                        </Show>
+                        <Show when={!movieFilter() && !musicDirectorFilter() && artistFilter()}>
                           <div class="mt-1 truncate text-sm text-[var(--fg)]">{artistFilter()}</div>
                         </Show>
-                        <Show when={!movieFilter() && query().trim()}>
+                        <Show when={!movieFilter() && !musicDirectorFilter() && query().trim()}>
                           <div class="mt-1 text-xs text-[var(--soft)]">Songs, albums, and artists are separate views over the same results.</div>
                         </Show>
                       </div>
-                      <Show when={movieFilter() || artistFilter()}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setMovieFilter("");
-                            setArtistFilter("");
-                            setSearchTab("songs");
-                          }}
-                          class="shrink-0 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-                        >
-                          Clear filter
-                        </button>
-                      </Show>
+                      <div class="flex shrink-0 items-center gap-3">
+                        <Show when={libraryNavStack().length > 0}>
+                          <button
+                            type="button"
+                            onClick={restorePreviousLibraryView}
+                            class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+                          >
+                            Back
+                          </button>
+                        </Show>
+                        <Show when={movieFilter() || artistFilter() || musicDirectorFilter()}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMovieFilter("");
+                              setArtistFilter("");
+                              setMusicDirectorFilter("");
+                              setSearchTab("songs");
+                            }}
+                            class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+                          >
+                            Clear filter
+                          </button>
+                        </Show>
+                      </div>
                     </div>
 
                     <div class="mt-3 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
@@ -4570,7 +4683,7 @@ function App() {
                   </section>
                 </Show>
 
-                <Show when={searchTab() === "songs" || movieFilter() || artistFilter()}>
+                <Show when={searchTab() === "songs" || movieFilter() || artistFilter() || musicDirectorFilter()}>
                   <>
                     <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-4 py-2">
                       <SortableSongHeader columnKey="default" label="#" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-8 text-right" />
@@ -4617,8 +4730,8 @@ function App() {
                                         {currentTrackId() === song.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
                                       </span>
                                       <span class="min-w-0 flex-[1.4] truncate text-sm">{song.track}</span>
-                                      <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] md:block">{song.movie || "-"}</span>
-                                      <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] lg:block">{song.musicDirector || "-"}</span>
+                                      <DrilldownText value={song.movie} onClick={navigateToMovie} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] md:block" />
+                                      <DrilldownText value={song.musicDirector} onClick={navigateToMusicDirector} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] lg:block" />
                                       <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] xl:block">{song.singers || "-"}</span>
                                       <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{song.year || "-"}</span>
                                       <Show when={user()}>
@@ -4648,7 +4761,7 @@ function App() {
                   </>
                 </Show>
 
-                <Show when={searchTab() === "albums" && !movieFilter() && !artistFilter()}>
+                <Show when={searchTab() === "albums" && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
                   <div class="flex flex-1 items-start overflow-y-auto p-4">
                     <div class="flex flex-wrap gap-2">
                       <For each={visibleAlbums()}>
@@ -4670,7 +4783,7 @@ function App() {
                   </div>
                 </Show>
 
-                <Show when={searchTab() === "artists" && !movieFilter() && !artistFilter()}>
+                <Show when={searchTab() === "artists" && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
                   <div class="flex flex-1 items-start overflow-y-auto p-4">
                     <div class="flex flex-wrap gap-2">
                       <For each={visibleArtists()}>
@@ -4747,12 +4860,8 @@ function App() {
                                 {currentTrackId() === song.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
                               </span>
                               <span class="min-w-0 flex-[1.2] truncate text-sm">{song.track}</span>
-                              <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] md:block">
-                                {song.movie || "-"}
-                              </span>
-                              <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] lg:block">
-                                {song.musicDirector || "-"}
-                              </span>
+                              <DrilldownText value={song.movie} onClick={navigateToMovie} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] md:block" />
+                              <DrilldownText value={song.musicDirector} onClick={navigateToMusicDirector} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] lg:block" />
                               <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] xl:block">
                                 {song.singers || "-"}
                               </span>
