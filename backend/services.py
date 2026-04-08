@@ -2902,7 +2902,7 @@ def try_refresh_song_link(song_id: str, *, force_refresh: bool = False) -> dict 
             song_id,
             {
                 "album_url": refreshed_song.get("album_url") or album_url,
-                "track_number": refreshed_song.get("track_number") or track_number,
+                "track_number": refreshed_song.get("track_number") or row.get("track_number"),
                 "track_name": refreshed_song.get("track_name") or row.get("track_name"),
                 "url_320kbps": refreshed_song.get("url_320kbps") or row.get("url_320kbps"),
                 "movie_name": album.get("movie_name") or row.get("movie_name"),
