@@ -269,9 +269,36 @@ SPOTIFY_PUBLIC_HEADERS = {
 }
 radio_station_cache: dict[str, object] = {}
 radio_station_lock = threading.Lock()
+library_cache_signature_lock = threading.Lock()
+library_cache_signature = ""
+
+
+def current_db_signature() -> str:
+    db_path = Path(db.DUCKDB_PATH)
+    if not db_path.exists():
+        return ""
+    stat = db_path.stat()
+    return f"{stat.st_size}:{stat.st_mtime_ns}"
+
+
+def refresh_runtime_caches_for_db_change() -> None:
+    global library_cache_signature
+    signature = current_db_signature()
+    with library_cache_signature_lock:
+        if signature == library_cache_signature:
+            return
+        library_cache_signature = signature
+    status_cache.clear()
+    with song_cache_lock:
+        song_row_cache.clear()
+    with library_match_lock:
+        library_match_cache.clear()
+    with radio_station_lock:
+        radio_station_cache.clear()
 
 
 def get_read_conn():
+    refresh_runtime_caches_for_db_change()
     return db.get_conn(read_only=True)
 
 
@@ -1344,6 +1371,56 @@ def fetch_remote_db_manifest() -> dict:
     return payload
 
 
+def _duckdb_literal(path: Path) -> str:
+    return str(path).replace("'", "''")
+
+
+def merge_preserved_user_state(source_path: Path, target_path: Path) -> None:
+    if not source_path.exists():
+        return
+
+    conn = db.get_conn(str(target_path))
+    try:
+        conn.execute(f"ATTACH '{_duckdb_literal(source_path)}' AS previous (READ_ONLY)")
+        conn.execute("DELETE FROM user_sessions")
+        conn.execute("DELETE FROM favorite_songs")
+        conn.execute("DELETE FROM user_preferences")
+        conn.execute("DELETE FROM users")
+        conn.execute("INSERT INTO users SELECT * FROM previous.users")
+        conn.execute("INSERT INTO user_sessions SELECT * FROM previous.user_sessions")
+        conn.execute("INSERT INTO favorite_songs SELECT * FROM previous.favorite_songs")
+        conn.execute("INSERT INTO user_preferences SELECT * FROM previous.user_preferences")
+        conn.execute(
+            """
+            DELETE FROM playlist_songs
+            WHERE playlist_id IN (
+                SELECT playlist_id FROM playlists WHERE COALESCE(is_global, FALSE) = FALSE
+            )
+            """
+        )
+        conn.execute("DELETE FROM playlists WHERE COALESCE(is_global, FALSE) = FALSE")
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO playlists
+            SELECT *
+            FROM previous.playlists
+            WHERE COALESCE(is_global, FALSE) = FALSE
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO playlist_songs
+            SELECT ps.*
+            FROM previous.playlist_songs ps
+            JOIN previous.playlists p ON p.playlist_id = ps.playlist_id
+            WHERE COALESCE(p.is_global, FALSE) = FALSE
+            """
+        )
+        conn.execute("DETACH previous")
+    finally:
+        conn.close()
+
+
 def replace_live_duckdb(download_path: Path, manifest: dict) -> dict:
     db_path = Path(db.DUCKDB_PATH)
     backup_path = db_path.with_suffix(".previous")
@@ -1355,6 +1432,7 @@ def replace_live_duckdb(download_path: Path, manifest: dict) -> dict:
         if backup_path.exists():
             backup_path.unlink()
         if db_path.exists():
+            merge_preserved_user_state(db_path, download_path)
             os.replace(db_path, backup_path)
         os.replace(download_path, db_path)
         manifest_tmp_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))

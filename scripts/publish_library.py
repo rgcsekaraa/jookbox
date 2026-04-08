@@ -4,11 +4,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
+import db
 
 
 def iso_now() -> str:
@@ -38,6 +38,47 @@ def collect_stats(path: Path) -> dict[str, object]:
         "albums": albums,
         "latest_song_updated_at": latest_updated_at.isoformat() if latest_updated_at else "",
     }
+
+
+def _duckdb_literal(path: Path) -> str:
+    return str(path).replace("'", "''")
+
+
+def export_library_snapshot(source_db: Path, output_db: Path) -> None:
+    temp_output = output_db.with_suffix(".tmp")
+    if temp_output.exists():
+        temp_output.unlink()
+    if output_db.exists():
+        output_db.unlink()
+
+    conn = db.get_conn(str(temp_output))
+    try:
+        conn.execute(f"ATTACH '{_duckdb_literal(source_db)}' AS source (READ_ONLY)")
+        conn.execute("INSERT INTO albums SELECT * FROM source.albums")
+        conn.execute("INSERT INTO songs SELECT * FROM source.songs")
+        conn.execute("INSERT INTO scrape_runs SELECT * FROM source.scrape_runs")
+        conn.execute(
+            """
+            INSERT INTO playlists
+            SELECT *
+            FROM source.playlists
+            WHERE COALESCE(is_global, FALSE) = TRUE
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO playlist_songs
+            SELECT ps.*
+            FROM source.playlist_songs ps
+            JOIN source.playlists p ON p.playlist_id = ps.playlist_id
+            WHERE COALESCE(p.is_global, FALSE) = TRUE
+            """
+        )
+        conn.execute("DETACH source")
+    finally:
+        conn.close()
+
+    temp_output.replace(output_db)
 
 
 def build_manifest(stats_db: Path, download_path: Path, repo: str, ref: str, version: str) -> dict[str, object]:
@@ -78,7 +119,7 @@ def main() -> int:
     else:
         output_db.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source_db, output_db)
+        export_library_snapshot(source_db, output_db)
         manifest_source = output_db
 
     manifest = build_manifest(manifest_source, output_db, args.repo, args.ref, version)

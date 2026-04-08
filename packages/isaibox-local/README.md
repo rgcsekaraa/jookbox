@@ -5,10 +5,11 @@ It is intentionally trimmed for local playback and packaged library updates, not
 
 ## What it does
 
-- runs the app with the bundled DuckDB in `app/data/masstamilan.duckdb`
+- runs against the shared repo DuckDB in `../../data/masstamilan.duckdb` so local and main app use the same library file
 - keeps only the local playback app and packaged database flow
 - disables login, Google auth, Spotify import, radio, and admin UI
 - uses a built-in local profile so favorites and playlists still work without sign-in
+- preserves local personal playlists, favorites, sessions, and preferences during background library sync
 - runs separate frontend and backend containers
 - restarts automatically if the container crashes
 - warms an initial set of songs after launch so first playback is faster
@@ -82,9 +83,10 @@ docker compose down
 
 - local mode hides account/login actions and only exposes the local library experience
 - the backend image only includes the runtime files needed for local playback, caching, and packaged DB sync
-- persistent data stays in `app/data`, `app/exports`, and `app/.cache`
+- the shared library database stays in `../../data/masstamilan.duckdb`
+- package-local state files stay in `app/data`, `app/exports`, and `app/.cache`
 - cached audio is stored in `app/.cache/audio`
 - the app trims oldest cached songs automatically when the cache grows past `ISAIBOX_CACHE_LIMIT_GB`
-- the app keeps using the current DuckDB while it checks GitHub in the background, then atomically swaps to the new DB after checksum validation
+- the app keeps using the current DuckDB while it checks GitHub in the background, then atomically swaps to the new library after checksum validation and merges back personal user state
 - if background library sync fails, the UI shows an error and links users to the GitHub issues page
 - restart policy is `unless-stopped`

@@ -21,9 +21,10 @@ if exist .env (
 if not exist app\data mkdir app\data
 if not exist app\exports mkdir app\exports
 if not exist app\.cache\audio mkdir app\.cache\audio
+if not exist ..\..\data mkdir ..\..\data
 
-if not exist app\data\masstamilan.duckdb (
-  echo Missing packaged database: app\data\masstamilan.duckdb
+if not exist ..\..\data\masstamilan.duckdb (
+  echo Missing shared database: ..\..\data\masstamilan.duckdb
   pause
   exit /b 1
 )

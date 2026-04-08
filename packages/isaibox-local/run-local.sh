@@ -18,9 +18,10 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 mkdir -p app/data app/exports app/.cache/audio
+mkdir -p ../../data
 
-if [ ! -f app/data/masstamilan.duckdb ]; then
-  echo "Missing packaged database: app/data/masstamilan.duckdb"
+if [ ! -f ../../data/masstamilan.duckdb ]; then
+  echo "Missing shared database: ../../data/masstamilan.duckdb"
   exit 1
 fi
 
