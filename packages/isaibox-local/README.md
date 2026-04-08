@@ -12,6 +12,7 @@ This folder is a packaged local-only copy of `isaibox`.
 - warms an initial set of songs after launch so first playback is faster
 - lets you choose the host port with `.env`
 - lets you cap the local audio cache size
+- checks GitHub for a newer shared DuckDB in the background and swaps it in safely
 
 ## Prerequisite
 
@@ -53,10 +54,14 @@ Edit `.env` and change:
 ```env
 APP_PORT=6789
 ISAIBOX_CACHE_LIMIT_GB=20
+ISAIBOX_DB_SYNC_ENABLED=1
+ISAIBOX_DB_SYNC_MANIFEST_URL=https://raw.githubusercontent.com/rgcsekaraa/isaibox/main/packages/isaibox-local/app/data/library-manifest.json
+ISAIBOX_DB_SYNC_INTERVAL_SECONDS=1800
 ```
 
 For example, set `APP_PORT=9090` and restart the package.
 Set `ISAIBOX_CACHE_LIMIT_GB=0` if you want no automatic cache limit.
+Set `ISAIBOX_DB_SYNC_ENABLED=0` if you want to disable background library updates.
 
 ## Stop the package
 
@@ -77,4 +82,6 @@ docker compose down
 - persistent data stays in `app/data`, `app/exports`, and `app/.cache`
 - cached audio is stored in `app/.cache/audio`
 - the app trims oldest cached songs automatically when the cache grows past `ISAIBOX_CACHE_LIMIT_GB`
+- the app keeps using the current DuckDB while it checks GitHub in the background, then atomically swaps to the new DB after checksum validation
+- if background library sync fails, the UI shows an error and links users to the GitHub issues page
 - restart policy is `unless-stopped`

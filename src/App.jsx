@@ -388,6 +388,10 @@ function App() {
   const [showProfileMenu, setShowProfileMenu] = createSignal(false);
   const [loadingFrame, setLoadingFrame] = createSignal(0);
   const [pendingRadioOffset, setPendingRadioOffset] = createSignal(null);
+  const [pendingPlaylistSongId, setPendingPlaylistSongId] = createSignal("");
+  const [appOffline, setAppOffline] = createSignal(false);
+  const [offlineMessage, setOfflineMessage] = createSignal("");
+  const [dbSyncState, setDbSyncState] = createSignal(null);
 
   let worker;
   const audioRefs = [];
@@ -400,12 +404,16 @@ function App() {
   let searchTimeout;
   let removeKeydownListener = null;
   let removePointerdownListener = null;
+  let removeOnlineListener = null;
+  let removeOfflineListener = null;
   let prefetchTimer;
   let keyboardNavTimer;
   let scrollAnimationFrame;
   let adminRefreshTimer;
   let loadingTimer;
   let radioSyncTimer;
+  let healthPollTimer;
+  let dbSyncPollTimer;
   let crossfadeFrame;
   let themeMediaQuery;
   let syncSystemTheme;
@@ -419,7 +427,38 @@ function App() {
   const easeOutQuint = (value) => 1 - (1 - value) ** 5;
   const authEnabled = createMemo(() => !localMode());
   const libraryProfileEnabled = createMemo(() => localMode() || Boolean(user()));
+  const radioEnabled = createMemo(() => !localMode());
   const spotifyEnabled = createMemo(() => authEnabled() && Boolean(spotifyClientId()));
+  const localDbSyncLabel = createMemo(() => {
+    const sync = dbSyncState();
+    if (!localMode() || !sync?.enabled) {
+      return "";
+    }
+    if (sync.status === "checking") {
+      return "Checking library";
+    }
+    if (sync.status === "downloading") {
+      if (sync.totalBytes > 0 && sync.downloadedBytes > 0) {
+        const percent = Math.min(100, Math.round((sync.downloadedBytes / sync.totalBytes) * 100));
+        return `Updating library ${percent}%`;
+      }
+      return "Updating library";
+    }
+    if (sync.status === "error") {
+      return "Library sync error";
+    }
+    return "Library synced";
+  });
+  const localDbSyncTone = createMemo(() => {
+    const status = dbSyncState()?.status;
+    if (status === "error") {
+      return "border-[#d36b6b] text-[#d36b6b]";
+    }
+    if (status === "checking" || status === "downloading") {
+      return "border-[var(--brand)] text-[var(--brand)]";
+    }
+    return "border-[var(--line)] text-[var(--soft)]";
+  });
 
   const animateListScroll = (targetScrollTop) => {
     if (!listRef) {
@@ -468,6 +507,108 @@ function App() {
         filteredIds.forEach((id) => prefetchedIds.delete(id));
       });
     }, 120);
+  };
+
+  const updatePlaylistSummary = (playlistId, patch) => {
+    if (!playlistId) {
+      return;
+    }
+    setPlaylists((current) => current.map((playlist) => {
+      if (playlist.id !== playlistId) {
+        return playlist;
+      }
+      const nextPatch = typeof patch === "function" ? patch(playlist) : patch;
+      return { ...playlist, ...(nextPatch || {}) };
+    }));
+  };
+
+  const appendTrackToPlaylistCache = (playlistId, track, nextTrackCount = null) => {
+    if (!playlistId || !track) {
+      return;
+    }
+    const applyTrack = (playlist) => {
+      if (!playlist || playlist.id !== playlistId) {
+        return playlist;
+      }
+      const tracks = Array.isArray(playlist.tracks) ? playlist.tracks : [];
+      if (tracks.some((item) => item.id === track.id)) {
+        return nextTrackCount == null ? playlist : { ...playlist, trackCount: nextTrackCount };
+      }
+      return {
+        ...playlist,
+        trackCount: nextTrackCount == null ? tracks.length + 1 : nextTrackCount,
+        tracks: [...tracks, track],
+      };
+    };
+
+    setPlaylistDetailCache((current) => {
+      if (!current.has(playlistId)) {
+        return current;
+      }
+      const next = new Map(current);
+      next.set(playlistId, applyTrack(next.get(playlistId)));
+      return next;
+    });
+    setGlobalPlaylistDetail((current) => applyTrack(current));
+  };
+
+  const markAppOffline = (message) => {
+    setAppOffline(true);
+    setOfflineMessage(message || "App is offline. Please check your internet connection or restart Docker.");
+  };
+
+  const markAppOnline = () => {
+    setAppOffline(false);
+    setOfflineMessage("");
+  };
+
+  const verifyAppOnline = async () => {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      markAppOffline("App is offline. Please check your internet connection or restart Docker.");
+      return false;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    try {
+      const response = await fetch("/api/health", {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        markAppOffline("App is offline. Please check your internet connection or restart Docker.");
+        return false;
+      }
+      markAppOnline();
+      return true;
+    } catch {
+      markAppOffline("App is offline. Please check your internet connection or restart Docker.");
+      return false;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  const refreshDbSyncStatus = async () => {
+    if (!localMode()) {
+      setDbSyncState(null);
+      return;
+    }
+    try {
+      const response = await fetch("/api/db-sync/status", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Unable to read library sync status");
+      }
+      const payload = await response.json();
+      setDbSyncState(payload.sync || null);
+    } catch (syncError) {
+      setDbSyncState((current) => current || {
+        enabled: true,
+        status: "error",
+        message: syncError?.message || "Unable to read library sync status",
+        githubIssuesUrl: "https://github.com/rgcsekaraa/isaibox/issues",
+      });
+    }
   };
 
   const visibleResults = createMemo(() => {
@@ -601,6 +742,9 @@ function App() {
     if (tab === "admin" && !user()?.is_admin) {
       return;
     }
+    if (tab === "radio" && !radioEnabled()) {
+      return;
+    }
     if (tab === "favorites" && !user()) {
       return;
     }
@@ -625,8 +769,11 @@ function App() {
       ...(payload || {}),
     };
     const nextThemePreference = ["system", "light", "dark"].includes(next.themePreference) ? next.themePreference : defaults.themePreference;
-    const requestedMainTab = ["library", "recents", "favorites", "radio", "admin"].includes(next.mainTab) ? next.mainTab : defaults.mainTab;
-    const nextMainTab = requestedMainTab === "radio" ? defaults.mainTab : requestedMainTab;
+    const allowedMainTabs = radioEnabled()
+      ? ["library", "recents", "favorites", "radio", "admin"]
+      : ["library", "recents", "favorites"];
+    const requestedMainTab = allowedMainTabs.includes(next.mainTab) ? next.mainTab : defaults.mainTab;
+    const nextMainTab = !radioEnabled() && requestedMainTab === "radio" ? defaults.mainTab : requestedMainTab;
     const nextRepeatMode = ["off", "one", "album", "random"].includes(next.repeatMode) ? next.repeatMode : defaults.repeatMode;
     const nextRecentSongIds = Array.isArray(next.recentSongIds) ? next.recentSongIds.filter((id) => typeof id === "string" && id).slice(0, 20) : [];
     const nextPlayerVolume = Number.isFinite(Number(next.playerVolume)) ? clampUnit(Number(next.playerVolume)) : defaults.playerVolume;
@@ -766,6 +913,9 @@ function App() {
   };
 
   const fetchRadioStations = async (forceRefresh = false, autoplayAfterLoad = false) => {
+    if (!radioEnabled()) {
+      return;
+    }
     if (!songs().length) {
       return;
     }
@@ -796,6 +946,9 @@ function App() {
   };
 
   const setMainBrowseTab = (tab) => {
+    if (tab === "radio" && !radioEnabled()) {
+      tab = "library";
+    }
     setMainTab(tab);
     if (tab === "admin") {
       return;
@@ -830,6 +983,9 @@ function App() {
   };
 
   const startRadio = () => {
+    if (!radioEnabled()) {
+      return;
+    }
     if (!radioStations().length) {
       void fetchRadioStations(true, true);
       return;
@@ -1450,9 +1606,19 @@ function App() {
       setAccountMessage(payload.message || "Unable to create playlist");
       return;
     }
+    const pendingSongId = pendingPlaylistSongId();
     setPlaylistNameInput("");
     setPlaylists((current) => [payload.playlist, ...current]);
     setSelectedPlaylistTarget(payload.playlist.id);
+    if (pendingSongId) {
+      setPendingPlaylistSongId("");
+      setShowCreatePlaylistModal(false);
+      const song = songIndex().get(pendingSongId);
+      if (song) {
+        await addSongToPlaylistById(payload.playlist.id, song);
+        return;
+      }
+    }
     setShowCreatePlaylistModal(false);
   };
 
@@ -1476,6 +1642,30 @@ function App() {
     setSelectedGlobalPlaylistTarget(payload.playlist.id);
   };
 
+  const addSongToPlaylistById = async (playlistId, song) => {
+    if (!user() || !playlistId || !song) {
+      return false;
+    }
+    const response = await fetch(`/api/playlists/${playlistId}/songs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ songId: song.id }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setAccountMessage(payload.message || "Unable to add song to playlist");
+      return false;
+    }
+    const nextTrackCount = payload.playlist?.trackCount;
+    updatePlaylistSummary(playlistId, (playlist) => ({
+      trackCount: Number.isFinite(Number(nextTrackCount)) ? Number(nextTrackCount) : playlist.trackCount,
+    }));
+    appendTrackToPlaylistCache(playlistId, payload.track, Number.isFinite(Number(nextTrackCount)) ? Number(nextTrackCount) : null);
+    setSelectedPlaylistTarget(playlistId);
+    setAccountMessage(payload.alreadyExists ? "Already in playlist" : "Saved to playlist");
+    return true;
+  };
+
   const addCurrentToPlaylist = async () => {
     if (!user() || !selectedPlaylistTarget() || !currentSong()) {
       if (!user()) {
@@ -1484,17 +1674,7 @@ function App() {
       }
       return;
     }
-    const response = await fetch(`/api/playlists/${selectedPlaylistTarget()}/songs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ songId: currentSong().id }),
-    });
-    if (!response.ok) {
-      setAccountMessage("Unable to add song to playlist");
-      return;
-    }
-    await refreshAccountState();
-    setAccountMessage("Saved to playlist");
+    await addSongToPlaylistById(selectedPlaylistTarget(), currentSong());
   };
 
   const saveCurrentToPlaylist = async () => {
@@ -1507,6 +1687,7 @@ function App() {
       return;
     }
     if (!playlists().length) {
+      setPendingPlaylistSongId(currentSong().id);
       setPlaylistNameInput(currentSong().movie ? `${currentSong().movie} picks` : "");
       setShowCreatePlaylistModal(true);
       requestAnimationFrame(() => {
@@ -1514,23 +1695,19 @@ function App() {
       });
       return;
     }
+    if (playlists().length === 1) {
+      await addSongToPlaylistById(playlists()[0].id, currentSong());
+      return;
+    }
     const playlistId = selectedPlaylistTarget() || playlists()[0]?.id || "";
     if (!playlistId) {
+      setPendingPlaylistSongId(currentSong().id);
       setShowCreatePlaylistModal(true);
       return;
     }
+    setPendingPlaylistSongId(currentSong().id);
     setSelectedPlaylistTarget(playlistId);
-    const response = await fetch(`/api/playlists/${playlistId}/songs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ songId: currentSong().id }),
-    });
-    if (!response.ok) {
-      setAccountMessage("Unable to add song to playlist");
-      return;
-    }
-    await refreshAccountState();
-    setAccountMessage("Saved to playlist");
+    setShowCreatePlaylistModal(true);
   };
 
   const addCurrentToGlobalPlaylist = async () => {
@@ -2068,6 +2245,9 @@ function App() {
     };
 
     const onKeyDown = (event) => {
+      if (appOffline()) {
+        return;
+      }
       const commandKey = event.ctrlKey || event.metaKey;
       const editable = isEditableTarget(event.target);
 
@@ -2122,7 +2302,7 @@ function App() {
         if (event.key === "1") activateMainTabShortcut("library");
         if (event.key === "2") activateMainTabShortcut("recents");
         if (event.key === "3") activateMainTabShortcut("favorites");
-        if (event.key === "4") activateMainTabShortcut("radio");
+        if (event.key === "4" && radioEnabled()) activateMainTabShortcut("radio");
         if (event.key === "5") activateMainTabShortcut("admin");
         return;
       }
@@ -2242,8 +2422,24 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("pointerdown", onPointerDown);
+    const onBrowserOnline = () => {
+      void verifyAppOnline();
+    };
+    const onBrowserOffline = () => {
+      markAppOffline("App is offline. Please check your internet connection or restart Docker.");
+    };
+    window.addEventListener("online", onBrowserOnline);
+    window.addEventListener("offline", onBrowserOffline);
     removeKeydownListener = () => window.removeEventListener("keydown", onKeyDown);
     removePointerdownListener = () => window.removeEventListener("pointerdown", onPointerDown);
+    removeOnlineListener = () => window.removeEventListener("online", onBrowserOnline);
+    removeOfflineListener = () => window.removeEventListener("offline", onBrowserOffline);
+
+    void verifyAppOnline();
+    clearInterval(healthPollTimer);
+    healthPollTimer = setInterval(() => {
+      void verifyAppOnline();
+    }, 15000);
 
     try {
       const [configResponse, statsResponse, songsResponse] = await Promise.all([
@@ -2287,8 +2483,13 @@ function App() {
       if (!Boolean(configPayload.localMode)) {
         await completeSpotifyAuthFromUrl();
       }
+      if (Boolean(configPayload.localMode)) {
+        await refreshDbSyncStatus();
+      }
       await refreshAccountState();
-      void fetchRadioStations().catch(() => {});
+      if (radioEnabled()) {
+        void fetchRadioStations().catch(() => {});
+      }
       if (user()?.is_admin) {
         await refreshAdminState();
       }
@@ -2370,6 +2571,18 @@ function App() {
         void refreshAdminState().catch(() => {});
       }, 10000);
     }
+  });
+
+  createEffect(() => {
+    clearInterval(dbSyncPollTimer);
+    if (!localMode()) {
+      setDbSyncState(null);
+      return;
+    }
+    void refreshDbSyncStatus();
+    dbSyncPollTimer = setInterval(() => {
+      void refreshDbSyncStatus();
+    }, 15000);
   });
 
   createEffect(() => {
@@ -2492,6 +2705,16 @@ function App() {
     }, 5000);
   });
 
+  createEffect(() => {
+    if (!appOffline()) {
+      return;
+    }
+    stopCrossfade();
+    audioRefs.forEach((audio) => audio?.pause());
+    setIsPlaying(false);
+    setStreamStarted(false);
+  });
+
   onCleanup(() => {
     clearTimeout(searchTimeout);
     clearTimeout(prefetchTimer);
@@ -2499,10 +2722,14 @@ function App() {
     clearInterval(adminRefreshTimer);
     clearInterval(loadingTimer);
     clearInterval(radioSyncTimer);
+    clearInterval(healthPollTimer);
+    clearInterval(dbSyncPollTimer);
     stopCrossfade();
     cancelAnimationFrame(scrollAnimationFrame);
     removeKeydownListener?.();
     removePointerdownListener?.();
+    removeOnlineListener?.();
+    removeOfflineListener?.();
     worker?.terminate();
     audioRefs.forEach((audio) => audio?.pause());
     if (themeMediaQuery && syncSystemTheme) {
@@ -2515,7 +2742,13 @@ function App() {
   });
 
   return (
-    <main class="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--bg)] text-[var(--fg)]">
+    <main class={`relative flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--bg)] text-[var(--fg)] ${appOffline() ? "pointer-events-none select-none opacity-60" : ""}`}>
+      <Show when={appOffline()}>
+        <div class="pointer-events-none absolute inset-x-0 top-0 z-[80] border-b border-[var(--line)] bg-[var(--bg)]/95 px-6 py-3 backdrop-blur">
+          <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--fg)]">Offline</div>
+          <div class="mt-1 text-sm text-[var(--soft)]">{offlineMessage() || "App is offline. Please check your internet connection or restart Docker."}</div>
+        </div>
+      </Show>
       <header class="flex min-w-0 flex-wrap items-center gap-3 border-b border-[var(--line)] px-6 py-4 sm:flex-nowrap sm:justify-between">
         <span class="group relative inline-flex shrink-0 items-center gap-3">
           <BrandIcon />
@@ -2543,9 +2776,29 @@ function App() {
             class="pointer-events-none absolute left-[-9999px] top-0 opacity-0"
           />
           <Show when={localMode()}>
-            <span class="rounded-full border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
-              Local library
-            </span>
+            <div class="flex min-w-0 items-center gap-2">
+              <span class="rounded-full border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+                Local library
+              </span>
+              <Show when={localDbSyncLabel()}>
+                <span
+                  class={`max-w-[220px] truncate rounded-full border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] ${localDbSyncTone()}`}
+                  title={dbSyncState()?.message || localDbSyncLabel()}
+                >
+                  {localDbSyncLabel()}
+                </span>
+              </Show>
+              <Show when={dbSyncState()?.status === "error" && dbSyncState()?.githubIssuesUrl}>
+                <a
+                  href={dbSyncState().githubIssuesUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="text-xs text-[var(--soft)] underline decoration-[var(--line)] underline-offset-4 transition hover:text-[var(--fg)]"
+                >
+                  Raise issue
+                </a>
+              </Show>
+            </div>
           </Show>
           <Show when={authEnabled()}>
           <Show
@@ -2690,9 +2943,11 @@ function App() {
                 Favorites {favoriteSongs().length ? `(${favoriteSongs().length})` : ""}
               </button>
             </Show>
-            <button type="button" onClick={() => setMainBrowseTab("radio")} class={`px-1 py-1 ${mainTab() === "radio" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
-              Radio
-            </button>
+            <Show when={radioEnabled()}>
+              <button type="button" onClick={() => setMainBrowseTab("radio")} class={`px-1 py-1 ${mainTab() === "radio" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
+                Radio
+              </button>
+            </Show>
             <Show when={authEnabled() && user()?.is_admin}>
               <button type="button" onClick={() => setMainBrowseTab("admin")} class={`px-1 py-1 ${mainTab() === "admin" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
                 Admin
@@ -2732,111 +2987,6 @@ function App() {
           </Show>
         </div>
       </section>
-
-      <Show when={libraryProfileEnabled()}>
-        <section class="border-b border-[var(--line-soft)] px-6 py-3">
-          <div class="flex flex-wrap items-center gap-3">
-            <span class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
-              Favorites {favoriteIds().length}
-            </span>
-            <input
-              value={playlistNameInput()}
-              onInput={(event) => setPlaylistNameInput(event.currentTarget.value)}
-              placeholder="New playlist"
-              class="min-w-[140px] bg-transparent font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
-            />
-            <button
-              type="button"
-              onClick={() => void createPlaylist()}
-              class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-            >
-              Create playlist
-            </button>
-            <Show when={playlists().length > 0}>
-              <select
-                value={selectedPlaylistTarget()}
-                onChange={(event) => setSelectedPlaylistTarget(event.currentTarget.value)}
-                class="bg-transparent font-mono text-xs text-[var(--fg)] outline-none"
-              >
-                <For each={playlists()}>
-                  {(playlist) => <option value={playlist.id}>{playlist.name} ({playlist.trackCount})</option>}
-                </For>
-              </select>
-              <button
-                type="button"
-                onClick={() => void addCurrentToPlaylist()}
-                class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-              >
-                Add current
-              </button>
-            </Show>
-            <Show when={spotifyEnabled()}>
-              <input
-                value={spotifyImportUrl()}
-                onInput={(event) => setSpotifyImportUrl(event.currentTarget.value)}
-                placeholder="Paste Spotify playlist link"
-                class="min-w-[220px] flex-1 bg-transparent font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
-              />
-              <button
-                type="button"
-                onClick={() => void importSpotifyPlaylist()}
-                class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-              >
-                Import Spotify
-              </button>
-              <button
-                type="button"
-                onClick={() => void (spotifyConnected() ? disconnectSpotify() : beginSpotifyConnect())}
-                title={spotifyConnected() ? "Disconnect Spotify" : "Connect Spotify"}
-                class={`flex h-8 w-8 items-center justify-center rounded-full border transition ${
-                  spotifyConnected()
-                    ? "border-[var(--fg)] text-[var(--fg)]"
-                    : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
-                }`}
-              >
-                <SpotifyIcon />
-              </button>
-              <Show when={spotifyConnected()}>
-                <button
-                  type="button"
-                  onClick={() => void debugSpotifySession()}
-                  class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-                >
-                  Debug Spotify
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void importSpotifyLikedSongs().catch((error) => setAccountMessage(error?.message || "Spotify liked songs import failed"))}
-                  class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-                >
-                  Import likes
-                </button>
-                <Show when={spotifyPlaylists().length > 0}>
-                  <select
-                    value={selectedSpotifyPlaylistId()}
-                    onChange={(event) => setSelectedSpotifyPlaylistId(event.currentTarget.value)}
-                    class="bg-transparent font-mono text-xs text-[var(--fg)] outline-none"
-                  >
-                    <For each={spotifyPlaylists()}>
-                      {(playlist) => <option value={playlist.id}>{playlist.name} ({playlist.trackCount})</option>}
-                    </For>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void importSpotifyAccountPlaylist().catch((error) => setAccountMessage(error?.message || "Spotify playlist import failed"))}
-                    class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-                  >
-                    Import selected
-                  </button>
-                </Show>
-              </Show>
-            </Show>
-          </div>
-            <Show when={accountMessage()}>
-              <div class="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">{accountMessage()}</div>
-            </Show>
-        </section>
-      </Show>
 
       <Show when={user()?.is_admin && mainTab() === "admin"}>
         <section class="border-b border-[var(--line-soft)] px-6 py-4">
@@ -4078,18 +4228,60 @@ function App() {
           <div class="absolute left-1/2 top-1/2 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 border border-[var(--line)] bg-[var(--bg)] p-5 shadow-2xl">
             <div class="flex items-start justify-between gap-4">
               <div>
-                <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Create playlist</div>
-                <div class="mt-2 text-sm text-[var(--soft)]">Create one first, then the current song can be saved into it.</div>
+                <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
+                  {playlists().length ? "Save to playlist" : "Create playlist"}
+                </div>
+                <div class="mt-2 text-sm text-[var(--soft)]">
+                  {playlists().length
+                    ? "Choose an existing playlist or create a new one for the current song."
+                    : "Create one first, then the current song will be saved into it."}
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => setShowCreatePlaylistModal(false)}
+                onClick={() => {
+                  setPendingPlaylistSongId("");
+                  setShowCreatePlaylistModal(false);
+                }}
                 class="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:text-[var(--fg)]"
               >
                 Close
               </button>
             </div>
             <div class="mt-5 space-y-4">
+              <Show when={playlists().length > 1}>
+                <div class="space-y-3 border border-[var(--line)] p-3">
+                  <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Existing playlists</div>
+                  <select
+                    value={selectedPlaylistTarget()}
+                    onChange={(event) => setSelectedPlaylistTarget(event.currentTarget.value)}
+                    class="w-full bg-transparent font-mono text-sm text-[var(--fg)] outline-none"
+                  >
+                    <For each={playlists()}>
+                      {(playlist) => <option value={playlist.id}>{playlist.name} ({playlist.trackCount})</option>}
+                    </For>
+                  </select>
+                  <div class="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const song = songIndex().get(pendingPlaylistSongId());
+                        if (song && selectedPlaylistTarget()) {
+                          void addSongToPlaylistById(selectedPlaylistTarget(), song).then((saved) => {
+                            if (saved) {
+                              setPendingPlaylistSongId("");
+                              setShowCreatePlaylistModal(false);
+                            }
+                          });
+                        }
+                      }}
+                      class="border border-[var(--fg)] px-4 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--fg)] transition hover:bg-[var(--fg)] hover:text-[var(--bg)]"
+                    >
+                      Save to selected
+                    </button>
+                  </div>
+                </div>
+              </Show>
               <input
                 ref={(el) => {
                   createPlaylistInputRef = el;
@@ -4108,7 +4300,10 @@ function App() {
               <div class="flex items-center justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => setShowCreatePlaylistModal(false)}
+                  onClick={() => {
+                    setPendingPlaylistSongId("");
+                    setShowCreatePlaylistModal(false);
+                  }}
                   class="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:text-[var(--fg)]"
                 >
                   Cancel
@@ -4118,7 +4313,7 @@ function App() {
                   onClick={() => void createPlaylist()}
                   class="border border-[var(--fg)] px-4 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--fg)] transition hover:bg-[var(--fg)] hover:text-[var(--bg)]"
                 >
-                  Create
+                  {pendingPlaylistSongId() ? "Create and save" : "Create"}
                 </button>
               </div>
             </div>

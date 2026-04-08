@@ -13,6 +13,8 @@ exports/
 *.csv
 !data/
 !data/masstamilan.duckdb
+!data/library-manifest.json
+data/db-sync-state.json
 
 # Python artifacts
 __pycache__/

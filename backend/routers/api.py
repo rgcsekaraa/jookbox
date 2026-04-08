@@ -5,6 +5,20 @@ def health():
     return json_response({"ok": True})
 
 
+@app.get("/api/db-sync/status")
+def db_sync_status():
+    return json_response({"ok": True, "sync": get_db_sync_state()})
+
+
+@app.post("/api/db-sync/check")
+def db_sync_check():
+    if not LOCAL_MODE:
+        return json_response({"ok": False, "message": "DB sync endpoint is for local mode"}), 403
+    payload = request.get_json(silent=True) or {}
+    state = sync_duckdb_from_remote(force=bool(payload.get("force")))
+    return json_response({"ok": True, "sync": state})
+
+
 @app.get("/api/stats")
 def stats():
     with get_read_conn() as conn:
@@ -123,6 +137,8 @@ def cache_trim():
 
 @app.get("/api/radio/stations")
 def radio_stations():
+    if LOCAL_MODE:
+        return json_response({"ok": False, "message": "Radio disabled in local mode"}), 404
     force_refresh = request.args.get("refresh") == "1"
     return json_response(get_radio_stations(force_refresh=force_refresh))
 
@@ -272,7 +288,7 @@ def config():
         {
             "localMode": LOCAL_MODE,
             "googleClientId": "" if LOCAL_MODE else GOOGLE_CLIENT_ID,
-            "geminiRadioEnabled": bool(GEMINI_API_KEYS),
+            "geminiRadioEnabled": False if LOCAL_MODE else bool(GEMINI_API_KEYS),
             "geminiKeyCount": len(GEMINI_API_KEYS),
             "spotifyClientId": "" if LOCAL_MODE else SPOTIFY_CLIENT_ID,
             "spotifyRedirectUri": "" if LOCAL_MODE else (SPOTIFY_REDIRECT_URI or origin),
@@ -428,7 +444,13 @@ def playlists():
     user = get_session_user()
     if not user:
         return json_response({"ok": True, "playlists": [], "globalPlaylists": global_playlists()})
-    return json_response({"ok": True, "playlists": playlists_for_user(user["user_id"]), "globalPlaylists": global_playlists()})
+    return json_response(
+        {
+            "ok": True,
+            "playlists": playlists_for_user(user["user_id"]),
+            "globalPlaylists": [] if LOCAL_MODE else global_playlists(),
+        }
+    )
 
 
 @app.post("/api/playlists")
@@ -554,7 +576,17 @@ def add_song_to_playlist(playlist_id: str):
             [playlist_id, song_id],
         ).fetchone()
         if existing:
-            return json_response({"ok": True, "alreadyExists": True})
+            track_count = conn.execute(
+                "SELECT COUNT(*) FROM playlist_songs WHERE playlist_id = ?",
+                [playlist_id],
+            ).fetchone()[0]
+            return json_response(
+                {
+                    "ok": True,
+                    "alreadyExists": True,
+                    "playlist": {"id": playlist_id, "trackCount": track_count},
+                }
+            )
         next_position = conn.execute(
             "SELECT COALESCE(MAX(position), 0) + 1 FROM playlist_songs WHERE playlist_id = ?",
             [playlist_id],
@@ -567,7 +599,17 @@ def add_song_to_playlist(playlist_id: str):
             [playlist_id, song_id, next_position, now_utc()],
         )
         conn.execute("UPDATE playlists SET updated_at = ? WHERE playlist_id = ?", [now_utc(), playlist_id])
-    return json_response({"ok": True})
+        track_count = conn.execute(
+            "SELECT COUNT(*) FROM playlist_songs WHERE playlist_id = ?",
+            [playlist_id],
+        ).fetchone()[0]
+    return json_response(
+        {
+            "ok": True,
+            "playlist": {"id": playlist_id, "trackCount": track_count},
+            "track": next((item for item in playlist_tracks(playlist_id) if item["id"] == song_id), None),
+        }
+    )
 
 
 @app.delete("/api/playlists/<playlist_id>/songs/<song_id>")

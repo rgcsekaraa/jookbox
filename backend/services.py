@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+import duckdb
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, Request as FastAPIRequest
@@ -34,6 +36,9 @@ ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = ROOT / "dist"
 CACHE_DIR = ROOT / ".cache" / "audio"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+LOCAL_DB_MANIFEST_PATH = ROOT / "data" / "library-manifest.json"
+DB_SYNC_STATE_PATH = ROOT / "data" / "db-sync-state.json"
+GITHUB_ISSUES_URL = "https://github.com/rgcsekaraa/isaibox/issues"
 
 
 def load_local_env() -> None:
@@ -215,6 +220,11 @@ LOCAL_MODE = env_flag("ISAIBOX_LOCAL_MODE", False)
 LOCAL_USER_ID = "local-library-user"
 LOCAL_CACHE_LIMIT_GB = max(0.0, float(os.environ.get("ISAIBOX_CACHE_LIMIT_GB", "20") or "20"))
 LOCAL_CACHE_LIMIT_BYTES = int(LOCAL_CACHE_LIMIT_GB * 1024 * 1024 * 1024)
+DEFAULT_DB_SYNC_MANIFEST_URL = "https://raw.githubusercontent.com/rgcsekaraa/isaibox/main/packages/isaibox-local/app/data/library-manifest.json"
+DB_SYNC_ENABLED = env_flag("ISAIBOX_DB_SYNC_ENABLED", LOCAL_MODE)
+DB_SYNC_MANIFEST_URL = os.environ.get("ISAIBOX_DB_SYNC_MANIFEST_URL", DEFAULT_DB_SYNC_MANIFEST_URL if LOCAL_MODE else "").strip()
+DB_SYNC_INTERVAL_SECONDS = max(900, int(os.environ.get("ISAIBOX_DB_SYNC_INTERVAL_SECONDS", "1800") or "1800"))
+DB_SYNC_TIMEOUT_SECONDS = max(5, int(os.environ.get("ISAIBOX_DB_SYNC_TIMEOUT_SECONDS", "30") or "30"))
 _GEMINI_KEYS_RAW = os.environ.get("GEMINI_API_KEYS", "") or os.environ.get("GEMINI_API_KEY", "")
 GEMINI_API_KEYS = [key.strip() for key in re.split(r"[\n,]+", _GEMINI_KEYS_RAW) if key.strip()]
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
@@ -244,6 +254,9 @@ RADIO_STATION_CACHE_TTL = timedelta(hours=12)
 RADIO_SHARED_SONG_SECONDS = 240
 AI_PLAYLIST_COUNT = 50
 AI_PLAYLIST_SONG_COUNT = 50
+db_sync_lock = threading.Lock()
+db_sync_state_lock = threading.Lock()
+db_sync_thread_started = False
 SPOTIFY_PUBLIC_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -1209,6 +1222,274 @@ def invalidate_library_match_cache() -> None:
         library_match_cache.clear()
 
 
+def iso_now() -> str:
+    return now_utc().isoformat()
+
+
+def default_db_sync_state() -> dict:
+    return {
+        "enabled": bool(DB_SYNC_ENABLED and DB_SYNC_MANIFEST_URL),
+        "status": "disabled" if not (DB_SYNC_ENABLED and DB_SYNC_MANIFEST_URL) else "idle",
+        "message": "Remote library sync disabled" if not (DB_SYNC_ENABLED and DB_SYNC_MANIFEST_URL) else "Waiting for background sync",
+        "manifestUrl": DB_SYNC_MANIFEST_URL,
+        "githubIssuesUrl": GITHUB_ISSUES_URL,
+        "currentVersion": "",
+        "remoteVersion": "",
+        "checkedAt": "",
+        "updatedAt": "",
+        "downloadedBytes": 0,
+        "totalBytes": 0,
+        "error": "",
+    }
+
+
+db_sync_state: dict = default_db_sync_state()
+
+
+def write_db_sync_state() -> None:
+    DB_SYNC_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DB_SYNC_STATE_PATH.write_text(json.dumps(db_sync_state, indent=2, sort_keys=True))
+
+
+def read_local_db_manifest() -> dict:
+    if LOCAL_DB_MANIFEST_PATH.exists():
+        try:
+            return json.loads(LOCAL_DB_MANIFEST_PATH.read_text())
+        except Exception:
+            pass
+    db_path = Path(db.DUCKDB_PATH)
+    if not db_path.exists():
+        return {}
+    stat = db_path.stat()
+    return {
+        "version": f"local-{int(stat.st_mtime)}",
+        "updated_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "size": stat.st_size,
+        "download_url": "",
+        "sha256": "",
+    }
+
+
+def refresh_db_sync_state_from_local_manifest() -> None:
+    local_manifest = read_local_db_manifest()
+    with db_sync_state_lock:
+        stale_transient_state = db_sync_state.get("status") in {"checking", "downloading"}
+        db_sync_state["currentVersion"] = local_manifest.get("version", "")
+        db_sync_state["manifestUrl"] = DB_SYNC_MANIFEST_URL
+        db_sync_state["githubIssuesUrl"] = GITHUB_ISSUES_URL
+        db_sync_state["enabled"] = bool(DB_SYNC_ENABLED and DB_SYNC_MANIFEST_URL)
+        if not db_sync_state["enabled"]:
+            db_sync_state["status"] = "disabled"
+            db_sync_state["message"] = "Remote library sync disabled"
+            db_sync_state["error"] = ""
+        elif stale_transient_state:
+            db_sync_state["status"] = "idle"
+            db_sync_state["message"] = "Waiting for background sync"
+            db_sync_state["downloadedBytes"] = 0
+            db_sync_state["totalBytes"] = 0
+        write_db_sync_state()
+
+
+def set_db_sync_state(**updates) -> dict:
+    with db_sync_state_lock:
+        db_sync_state.update(updates)
+        write_db_sync_state()
+        return dict(db_sync_state)
+
+
+def get_db_sync_state() -> dict:
+    with db_sync_state_lock:
+        return dict(db_sync_state)
+
+
+def load_db_sync_state() -> None:
+    if DB_SYNC_STATE_PATH.exists():
+        try:
+            saved = json.loads(DB_SYNC_STATE_PATH.read_text())
+        except Exception:
+            saved = {}
+        with db_sync_state_lock:
+            db_sync_state.update(saved)
+    refresh_db_sync_state_from_local_manifest()
+
+
+def validate_duckdb_file(path: Path) -> dict:
+    conn = duckdb.connect(str(path), read_only=True)
+    try:
+        song_count = conn.execute("SELECT COUNT(*) FROM songs").fetchone()[0]
+        album_count = conn.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
+        latest_updated_at = conn.execute(
+            "SELECT MAX(updated_at) FROM songs WHERE updated_at IS NOT NULL"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    if song_count <= 0:
+        raise ValueError("Downloaded database contained no songs")
+    return {
+        "songs": int(song_count),
+        "albums": int(album_count),
+        "latestUpdatedAt": latest_updated_at.isoformat() if latest_updated_at else "",
+    }
+
+
+def fetch_remote_db_manifest() -> dict:
+    if not DB_SYNC_MANIFEST_URL:
+        raise ValueError("DB sync manifest URL is not configured")
+    response = requests.get(DB_SYNC_MANIFEST_URL, timeout=DB_SYNC_TIMEOUT_SECONDS)
+    response.raise_for_status()
+    payload = response.json()
+    for key in ("version", "download_url", "sha256", "size"):
+        if not payload.get(key):
+            raise ValueError(f"Manifest missing required field: {key}")
+    return payload
+
+
+def replace_live_duckdb(download_path: Path, manifest: dict) -> dict:
+    db_path = Path(db.DUCKDB_PATH)
+    backup_path = db_path.with_suffix(".previous")
+    manifest_tmp_path = LOCAL_DB_MANIFEST_PATH.with_suffix(".json.tmp")
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    LOCAL_DB_MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if backup_path.exists():
+            backup_path.unlink()
+        if db_path.exists():
+            os.replace(db_path, backup_path)
+        os.replace(download_path, db_path)
+        manifest_tmp_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+        os.replace(manifest_tmp_path, LOCAL_DB_MANIFEST_PATH)
+    except Exception:
+        if manifest_tmp_path.exists():
+            manifest_tmp_path.unlink()
+        if not db_path.exists() and backup_path.exists():
+            os.replace(backup_path, db_path)
+        raise
+    else:
+        if backup_path.exists():
+            backup_path.unlink()
+
+    invalidate_song_cache()
+    invalidate_library_match_cache()
+    return validate_duckdb_file(db_path)
+
+
+def sync_duckdb_from_remote(force: bool = False) -> dict:
+    if not (DB_SYNC_ENABLED and DB_SYNC_MANIFEST_URL):
+        return set_db_sync_state(
+            enabled=False,
+            status="disabled",
+            message="Remote library sync disabled",
+        )
+
+    if not db_sync_lock.acquire(blocking=False):
+        return get_db_sync_state()
+
+    download_path = Path(db.DUCKDB_PATH).with_suffix(".download")
+    try:
+        local_manifest = read_local_db_manifest()
+        set_db_sync_state(
+            enabled=True,
+            status="checking",
+            message="Checking for library updates...",
+            checkedAt=iso_now(),
+            currentVersion=local_manifest.get("version", ""),
+            downloadedBytes=0,
+            totalBytes=0,
+            error="",
+        )
+        remote_manifest = fetch_remote_db_manifest()
+        set_db_sync_state(
+            remoteVersion=remote_manifest.get("version", ""),
+            totalBytes=int(remote_manifest.get("size") or 0),
+        )
+
+        if not force and remote_manifest.get("version") == local_manifest.get("version"):
+            return set_db_sync_state(
+                status="idle",
+                message="Library is up to date",
+                checkedAt=iso_now(),
+                updatedAt=local_manifest.get("updated_at", "") or get_db_sync_state().get("updatedAt", ""),
+                currentVersion=local_manifest.get("version", ""),
+            )
+
+        set_db_sync_state(status="downloading", message="Downloading latest library...")
+        if download_path.exists():
+            download_path.unlink()
+        hasher = hashlib.sha256()
+        with requests.get(remote_manifest["download_url"], stream=True, timeout=DB_SYNC_TIMEOUT_SECONDS) as response:
+            response.raise_for_status()
+            with download_path.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if not chunk:
+                        continue
+                    handle.write(chunk)
+                    hasher.update(chunk)
+                    set_db_sync_state(downloadedBytes=download_path.stat().st_size)
+
+        expected_sha = str(remote_manifest["sha256"]).strip().lower()
+        actual_sha = hasher.hexdigest().lower()
+        if actual_sha != expected_sha:
+            raise ValueError("Downloaded database checksum did not match manifest")
+        if int(remote_manifest.get("size") or 0) and download_path.stat().st_size != int(remote_manifest["size"]):
+            raise ValueError("Downloaded database size did not match manifest")
+
+        validate_duckdb_file(download_path)
+        live_stats = replace_live_duckdb(download_path, remote_manifest)
+        return set_db_sync_state(
+            status="idle",
+            message="Library updated successfully",
+            checkedAt=iso_now(),
+            updatedAt=remote_manifest.get("updated_at", iso_now()),
+            currentVersion=remote_manifest.get("version", ""),
+            remoteVersion=remote_manifest.get("version", ""),
+            downloadedBytes=int(remote_manifest.get("size") or 0),
+            totalBytes=int(remote_manifest.get("size") or 0),
+            liveSongs=live_stats["songs"],
+            liveAlbums=live_stats["albums"],
+            error="",
+        )
+    except Exception as exc:
+        app.logger.warning("Remote DB sync failed", exc_info=True)
+        if download_path.exists():
+            download_path.unlink()
+        return set_db_sync_state(
+            status="error",
+            message=f"{exc}. Please raise an issue on GitHub if this keeps happening.",
+            checkedAt=iso_now(),
+            error=str(exc),
+        )
+    finally:
+        db_sync_lock.release()
+
+
+def db_sync_loop() -> None:
+    while True:
+        try:
+            sync_duckdb_from_remote(force=False)
+        except Exception:
+            app.logger.warning("Background DB sync loop failed", exc_info=True)
+        time.sleep(DB_SYNC_INTERVAL_SECONDS)
+
+
+def ensure_db_sync_thread_started() -> None:
+    global db_sync_thread_started
+    if db_sync_thread_started or not LOCAL_MODE:
+        return
+    load_db_sync_state()
+    if not (DB_SYNC_ENABLED and DB_SYNC_MANIFEST_URL):
+        return
+    worker = threading.Thread(target=db_sync_loop, daemon=True, name="isaibox-db-sync")
+    worker.start()
+    db_sync_thread_started = True
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    if LOCAL_MODE:
+        ensure_db_sync_thread_started()
+
+
 def sign_value(value: str) -> str:
     digest = hmac.new(SESSION_SECRET.encode(), value.encode(), hashlib.sha256).hexdigest()
     return f"{value}.{digest}"
@@ -1484,7 +1765,10 @@ def save_user_preferences(user_id: str, payload: dict) -> dict:
     )
     if prefs["themePreference"] not in {"system", "light", "dark"}:
         prefs["themePreference"] = "system"
-    if prefs["mainTab"] not in {"library", "recents", "favorites", "radio", "admin"}:
+    allowed_main_tabs = {"library", "recents", "favorites"}
+    if not LOCAL_MODE:
+        allowed_main_tabs.update({"radio", "admin"})
+    if prefs["mainTab"] not in allowed_main_tabs:
         prefs["mainTab"] = "library"
     if prefs["repeatMode"] not in {"off", "one", "album", "random"}:
         prefs["repeatMode"] = "off"

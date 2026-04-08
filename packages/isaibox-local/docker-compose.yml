@@ -10,6 +10,9 @@ services:
       ISAIBOX_PORT: "6060"
       ISAIBOX_LOG_LEVEL: "info"
       ISAIBOX_CACHE_LIMIT_GB: "${ISAIBOX_CACHE_LIMIT_GB:-20}"
+      ISAIBOX_DB_SYNC_ENABLED: "${ISAIBOX_DB_SYNC_ENABLED:-1}"
+      ISAIBOX_DB_SYNC_MANIFEST_URL: "${ISAIBOX_DB_SYNC_MANIFEST_URL:-https://raw.githubusercontent.com/rgcsekaraa/isaibox/main/packages/isaibox-local/app/data/library-manifest.json}"
+      ISAIBOX_DB_SYNC_INTERVAL_SECONDS: "${ISAIBOX_DB_SYNC_INTERVAL_SECONDS:-1800}"
     volumes:
       - ./app/data:/app/data
       - ./app/exports:/app/exports
