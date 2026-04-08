@@ -178,7 +178,7 @@ def song_status(song_id: str):
 
 
 def open_upstream_stream(song_id: str, url: str, album_url: str | None = None):
-    headers = build_upstream_headers(song_id=song_id, album_url=album_url)
+    headers = build_upstream_headers(song_id=song_id, album_url=album_url, forward_range=True)
     upstream, source = request_upstream(url, headers=headers, stream=True, timeout=(5, 30))
 
     if not is_playable_upstream_response(upstream):
@@ -246,7 +246,7 @@ def stream_song(song_id: str):
     passthrough_headers.setdefault("Accept-Ranges", "bytes")
     passthrough_headers["Cache-Control"] = "public, max-age=3600"
 
-    should_cache = not request.headers.get("Range") or request.headers.get("Range") == "bytes=0-"
+    should_cache = (not LOCAL_MODE) and (not request.headers.get("Range") or request.headers.get("Range") == "bytes=0-")
     temp_path = cached_path.with_suffix(".part")
 
     def generate():

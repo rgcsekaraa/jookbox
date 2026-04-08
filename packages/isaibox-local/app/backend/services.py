@@ -2727,7 +2727,12 @@ def is_playable_upstream_response(response: requests.Response | None) -> bool:
     return response.status_code in (200, 206) and is_audio_content_type(content_type)
 
 
-def build_upstream_headers(song_id: str | None = None, album_url: str | None = None) -> dict[str, str]:
+def build_upstream_headers(
+    song_id: str | None = None,
+    album_url: str | None = None,
+    *,
+    forward_range: bool = False,
+) -> dict[str, str]:
     headers = dict(UPSTREAM_HEADERS)
     if album_url:
         headers["Referer"] = album_url
@@ -2735,8 +2740,11 @@ def build_upstream_headers(song_id: str | None = None, album_url: str | None = N
         row = get_song_row(song_id)
         if row and row.get("album_url"):
             headers["Referer"] = row["album_url"]
-    if has_request_context() and not LOCAL_MODE:
-        for header in ("Range", "If-Range", "If-Modified-Since", "If-None-Match"):
+    if has_request_context():
+        forwarded_headers = ("Range", "If-Range") if forward_range else ()
+        if not LOCAL_MODE:
+            forwarded_headers += ("If-Modified-Since", "If-None-Match")
+        for header in forwarded_headers:
             value = request.headers.get(header)
             if value:
                 headers[header] = value

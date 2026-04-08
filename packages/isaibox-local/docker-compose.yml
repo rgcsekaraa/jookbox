@@ -20,7 +20,7 @@ services:
       - ../../data:/app/shared-data
       - ./app/data:/app/data
       - ./app/exports:/app/exports
-      - ./app/.cache:/app/.cache
+      - isaibox-local-audio-cache:/app/.cache/audio
     restart: unless-stopped
   frontend:
     build:
@@ -32,3 +32,6 @@ services:
     ports:
       - "${APP_PORT:-6789}:5173"
     restart: unless-stopped
+
+volumes:
+  isaibox-local-audio-cache:
