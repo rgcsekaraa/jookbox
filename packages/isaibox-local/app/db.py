@@ -26,7 +26,12 @@ DUCKDB_PATH = os.environ.get(
     "DUCKDB_PATH",
     str(_HERE / "data" / "masstamilan.duckdb"),
 )
-BUNDLED_DUCKDB_PATH = _HERE / "data" / "masstamilan.duckdb"
+BUNDLED_DUCKDB_PATH = Path(
+    os.environ.get(
+        "ISAIBOX_BUNDLED_DUCKDB_PATH",
+        str(_HERE / "data" / "masstamilan.duckdb"),
+    )
+)
 REQUIRED_LIBRARY_TABLES = ("songs", "albums")
 
 # ── DDL ──────────────────────────────────────────────────────────────────────

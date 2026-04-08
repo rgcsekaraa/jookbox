@@ -23,8 +23,11 @@ COPY app/storage_backends.py ./storage_backends.py
 COPY app/backend ./backend
 COPY app/dist ./dist
 COPY app/data ./data
+RUN mkdir -p /app/bundled-data \
+    && cp ./data/masstamilan.duckdb /app/bundled-data/masstamilan.duckdb
 
 RUN chmod -R a+rX ./dist ./data \
+    && chmod -R a+rX /app/bundled-data \
     && mkdir -p .cache/audio exports data
 
 EXPOSE 6060
