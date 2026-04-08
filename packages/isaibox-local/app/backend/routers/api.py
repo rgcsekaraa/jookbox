@@ -141,13 +141,13 @@ def prefetch_songs():
     ids = payload.get("ids") or []
     queued = 0
 
-    for song_id in ids[:8]:
+    for song_id in ids[:3]:
         row = get_song_row(song_id)
         if not row:
             continue
         if is_cached(song_id):
             continue
-        ensure_song_cached_async(row["song_id"], row["url_320kbps"])
+        ensure_song_cached_async(row["song_id"])
         queued += 1
 
     return json_response({"ok": True, "queued": queued})
@@ -162,8 +162,8 @@ def song_status(song_id: str):
     return json_response(get_stream_health(song_id, url))
 
 
-def open_upstream_stream(song_id: str, url: str):
-    headers = build_upstream_headers(song_id)
+def open_upstream_stream(song_id: str, url: str, album_url: str | None = None):
+    headers = build_upstream_headers(song_id=song_id, album_url=album_url)
     upstream, source = request_upstream(url, headers=headers, stream=True, timeout=(5, 30))
 
     if not is_playable_upstream_response(upstream):
@@ -176,7 +176,7 @@ def open_upstream_stream(song_id: str, url: str):
                 upstream.headers.get("Content-Type"),
             )
             upstream.close()
-        refreshed = try_refresh_song_link(song_id)
+        refreshed = try_refresh_song_link_with_timeout(song_id, force_refresh=True)
         refreshed_url = refreshed["url_320kbps"] if refreshed else url
         upstream, source = request_upstream(refreshed_url or url, headers=headers, stream=True, timeout=(5, 30))
         url = refreshed_url or url
@@ -200,7 +200,6 @@ def stream_song(song_id: str):
     if not row:
         app.logger.warning("Stream request for unknown song_id=%s", song_id)
         return json_response({"ok": False, "message": "Song not found"}), 404
-    url = row["url_320kbps"]
 
     cached_path = get_cache_path(song_id)
     if is_cached(song_id):
@@ -208,7 +207,9 @@ def stream_song(song_id: str):
     if restore_from_shared_cache(song_id):
         return file_response(cached_path, mimetype="audio/mpeg", conditional=True, etag=True, max_age=3600)
 
-    upstream, url = open_upstream_stream(song_id, url)
+    row = resolve_song_row_for_playback(song_id) or row
+    url = row["url_320kbps"]
+    upstream, url = open_upstream_stream(song_id, url, row.get("album_url"))
     if upstream is None or upstream.status_code not in (200, 206) or not is_audio_content_type(upstream.headers.get("Content-Type")):
         app.logger.warning(
             "Stream unavailable for %s: status=%s content_type=%s",
@@ -447,9 +448,10 @@ def create_playlist():
     if error_response:
         return error_response
     payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "").strip()
-    if not name:
-        return json_response({"ok": False, "message": "Playlist name is required"}), 400
+    try:
+        name = normalize_playlist_name(payload.get("name", ""))
+    except ValueError as exc:
+        return json_response({"ok": False, "message": str(exc)}), 400
     playlist_id = secrets.token_hex(16)
     with db.get_conn() as conn:
         conn.execute(

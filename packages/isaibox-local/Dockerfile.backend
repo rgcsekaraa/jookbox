@@ -24,7 +24,8 @@ COPY app/backend ./backend
 COPY app/dist ./dist
 COPY app/data ./data
 
-RUN mkdir -p .cache/audio exports data
+RUN chmod -R a+rX ./dist ./data \
+    && mkdir -p .cache/audio exports data
 
 EXPOSE 6060
 

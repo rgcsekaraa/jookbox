@@ -9,6 +9,7 @@ services:
       ISAIBOX_HOST: "0.0.0.0"
       ISAIBOX_PORT: "6060"
       ISAIBOX_LOG_LEVEL: "info"
+      ISAIBOX_WORKERS: "1"
       DUCKDB_PATH: "/app/shared-data/masstamilan.duckdb"
       ISAIBOX_CACHE_LIMIT_GB: "${ISAIBOX_CACHE_LIMIT_GB:-20}"
       ISAIBOX_DB_SYNC_ENABLED: "${ISAIBOX_DB_SYNC_ENABLED:-1}"

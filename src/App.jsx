@@ -46,6 +46,16 @@ const formatTime = (seconds) => {
   return `${mins}:${secs}`;
 };
 
+const PLAYLIST_NAME_MAX_LENGTH = 120;
+
+const sanitizePlaylistName = (value) => String(value || "")
+  .replace(/[\x00-\x1f\x7f]+/g, " ")
+  .replace(/\s+/g, " ")
+  .trim()
+  .slice(0, PLAYLIST_NAME_MAX_LENGTH);
+
+const sanitizeSpotifyPlaylistUrl = (value) => String(value || "").replace(/\s+/g, "").trim();
+
 const TooltipBubble = (props) => (
   <span class={`pointer-events-none absolute ${props.position || "bottom-full left-1/2 mb-2 -translate-x-1/2"} z-20 whitespace-nowrap border border-[var(--line)] bg-[var(--bg)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--fg)] opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 group-focus-within:opacity-100`}>
     {props.text}
@@ -397,6 +407,8 @@ function App() {
   const [showSettings, setShowSettings] = createSignal(false);
   const [dbSyncState, setDbSyncState] = createSignal(null);
   const [configReady, setConfigReady] = createSignal(false);
+  const [playlistMutationBusy, setPlaylistMutationBusy] = createSignal("");
+  const [playlistCreateBusy, setPlaylistCreateBusy] = createSignal(false);
 
   let worker;
   const audioRefs = [];
@@ -417,6 +429,7 @@ function App() {
   let adminRefreshTimer;
   let loadingTimer;
   let radioSyncTimer;
+  let healthPollTimer;
   let cachePollTimer;
   let dbSyncPollTimer;
   let crossfadeFrame;
@@ -424,6 +437,7 @@ function App() {
   let syncSystemTheme;
   let crossfadeToken = 0;
   let playlistDetailRequestToken = 0;
+  let playlistDetailAbortController = null;
   let activeDeckIndex = 0;
   let fadingAudio = null;
   const prefetchedIds = new Set();
@@ -519,9 +533,13 @@ function App() {
   };
 
   const prefetchSongIds = (ids) => {
+    if (appOffline()) {
+      return;
+    }
+    const localLimit = localMode() ? 3 : 8;
     const filteredIds = [...new Set(ids.filter(Boolean))]
       .filter((id) => !prefetchedIds.has(id))
-      .slice(0, 8);
+      .slice(0, localLimit);
     if (!filteredIds.length) {
       return;
     }
@@ -536,7 +554,7 @@ function App() {
       }).catch(() => {
         filteredIds.forEach((id) => prefetchedIds.delete(id));
       });
-    }, 120);
+    }, localMode() ? 220 : 120);
   };
 
   const updatePlaylistSummary = (playlistId, patch) => {
@@ -596,6 +614,24 @@ function App() {
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       markAppOffline("No internet connection detected.");
       return false;
+    }
+    if (localMode()) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      try {
+        const response = await fetch("/api/health", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error("Local backend is not responding.");
+        }
+      } catch {
+        markAppOffline("Local backend is not responding. Docker may need a restart.");
+        return false;
+      } finally {
+        clearTimeout(timeoutId);
+      }
     }
     if (appOffline()) {
       markAppOnline();
@@ -1047,33 +1083,40 @@ function App() {
   };
 
   const saveRadioStationWithMode = async () => {
-    if (!user()?.is_admin || !currentRadioStation()) {
+    if (!user()?.is_admin || !currentRadioStation() || playlistMutationBusy()) {
       return;
     }
+    const requestedName = sanitizePlaylistName(radioSaveName()) || sanitizePlaylistName(currentRadioStation().name);
     const body = {
       mode: radioSaveMode(),
       targetPlaylistId: radioSaveMode() === "overwrite" ? selectedGlobalPlaylistTarget() : "",
-      name: radioSaveName().trim() || currentRadioStation().name,
+      name: requestedName,
     };
-    setAdminMessage("Saving radio station...");
-    const response = await fetch(`/api/admin/radio-stations/${currentRadioStation().id}/playlist`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      setAdminMessage(payload.message || "Unable to save radio station");
-      return;
+    setPlaylistMutationBusy("radio-save");
+    try {
+      setAdminMessage("Saving radio station...");
+      const response = await fetch(`/api/admin/radio-stations/${currentRadioStation().id}/playlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setAdminMessage(payload.message || "Unable to save radio station");
+        return;
+      }
+      await refreshAccountState();
+      await openGlobalPlaylist(payload.playlist.id);
+      setAdminMessage(`${payload.playlist.updatedExisting ? "Updated" : "Saved"} global playlist: ${payload.playlist.name}`);
+    } finally {
+      setPlaylistMutationBusy("");
     }
-    await refreshAccountState();
-    await openGlobalPlaylist(payload.playlist.id);
-    setAdminMessage(`${payload.playlist.updatedExisting ? "Updated" : "Saved"} global playlist: ${payload.playlist.name}`);
   };
 
   const getAudio = (index) => audioRefs[index] || null;
   const getActiveAudio = () => getAudio(activeDeckIndex);
   const getInactiveAudio = () => getAudio(activeDeckIndex === 0 ? 1 : 0);
+  const isSongLoadedInAnyDeck = (songId) => audioRefs.some((audio) => audio?.dataset.songId === songId);
 
   const stopCrossfade = () => {
     crossfadeToken += 1;
@@ -1133,6 +1176,28 @@ function App() {
     inactive.volume = 0;
   };
 
+  const playPrimaryDeck = (audio, song, relativeUrl) => {
+    if (!audio || !song || !relativeUrl) {
+      return Promise.reject(new Error("Primary deck unavailable"));
+    }
+    stopCrossfade();
+    resetInactiveDeck();
+    audio.pause();
+    audio.currentTime = 0;
+    audio.dataset.songId = song.id;
+    audio.src = relativeUrl;
+    audio.preload = "auto";
+    audio.load();
+    syncTimelineFromAudio(audio, true);
+    return audio.play().then(() => {
+      promoteDeck(activeDeckIndex);
+      audio.volume = muted() ? 0 : volume();
+      setIsPlaying(true);
+      setStreamStarted(true);
+      syncTimelineFromAudio(audio, true);
+    });
+  };
+
   const promoteDeck = (nextIndex) => {
     activeDeckIndex = nextIndex;
     syncDeckVolumes();
@@ -1186,7 +1251,7 @@ function App() {
         fetch("/api/auth/session"),
         fetch("/api/playlists"),
       ]);
-      const sessionPayload = await sessionResponse.json();
+      const sessionPayload = await sessionResponse.json().catch(() => ({}));
       const sessionUser = sessionPayload.user || null;
       setUser(sessionUser);
 
@@ -1214,11 +1279,9 @@ function App() {
             }
           }
         } else {
-          setPlaylists([]);
           setGlobalPlaylists([]);
         }
         setFavoriteIds([]);
-        setPlaylists([]);
         setPlaylistDetailCache(new Map());
         setPlaylistDetailLoading(false);
         setPlaylistDetailError("");
@@ -1330,17 +1393,22 @@ function App() {
     } catch {
       setUser(null);
       setFavoriteIds([]);
-      setPlaylists([]);
-      setGlobalPlaylists([]);
-      setPlaylistDetailCache(new Map());
-      setPlaylistDetailLoading(false);
-      setPlaylistDetailError("");
-      setSelectedPlaylistTarget("");
-      setSelectedGlobalPlaylistTarget("");
       setAdminUsers([]);
       setAirflowStatus(null);
-      setPreferenceStore("guest");
-      resetUserScopedPreferences();
+      if (!localMode()) {
+        setPlaylists([]);
+        setGlobalPlaylists([]);
+        setPlaylistDetailCache(new Map());
+        setPlaylistDetailLoading(false);
+        setPlaylistDetailError("");
+        setSelectedPlaylistTarget("");
+        setSelectedGlobalPlaylistTarget("");
+        setPreferenceStore("guest");
+        resetUserScopedPreferences();
+      } else {
+        setPreferenceStore("db");
+        setPreferencesReady(true);
+      }
     }
   };
 
@@ -1652,7 +1720,10 @@ function App() {
   };
 
   const createPlaylist = async () => {
-    const name = playlistNameInput().trim();
+    const name = sanitizePlaylistName(playlistNameInput());
+    if (playlistCreateBusy()) {
+      return;
+    }
     if (!user()) {
       setAccountMessage("Create an account to make playlists");
       setShowAuthPrompt(true);
@@ -1661,50 +1732,60 @@ function App() {
     if (!name) {
       return;
     }
-    const response = await fetch("/api/playlists", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      setAccountMessage(payload.message || "Unable to create playlist");
-      return;
-    }
-    const pendingSongId = pendingPlaylistSongId();
-    setPlaylistNameInput("");
-    setPlaylists((current) => [payload.playlist, ...current]);
-    setSelectedPlaylistTarget(payload.playlist.id);
-    if (pendingSongId) {
-      setPendingPlaylistSongId("");
-      setShowCreatePlaylistModal(false);
-      const song = songIndex().get(pendingSongId);
-      if (song) {
-        await addSongToPlaylistById(payload.playlist.id, song);
+    setPlaylistCreateBusy(true);
+    try {
+      const response = await fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setAccountMessage(payload.message || "Unable to create playlist");
         return;
       }
+      const pendingSongId = pendingPlaylistSongId();
+      setPlaylistNameInput("");
+      setPlaylists((current) => [payload.playlist, ...current]);
+      setSelectedPlaylistTarget(payload.playlist.id);
+      if (pendingSongId) {
+        setPendingPlaylistSongId("");
+        setShowCreatePlaylistModal(false);
+        const song = songIndex().get(pendingSongId);
+        if (song) {
+          await addSongToPlaylistById(payload.playlist.id, song);
+          return;
+        }
+      }
+      setShowCreatePlaylistModal(false);
+    } finally {
+      setPlaylistCreateBusy(false);
     }
-    setShowCreatePlaylistModal(false);
   };
 
   const createGlobalPlaylist = async () => {
-    const name = globalPlaylistNameInput().trim();
-    if (!name || !user()?.is_admin) {
+    const name = sanitizePlaylistName(globalPlaylistNameInput());
+    if (!name || !user()?.is_admin || playlistMutationBusy()) {
       return;
     }
-    const response = await fetch("/api/admin/playlists", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      setAccountMessage(payload.message || "Unable to create global playlist");
-      return;
+    setPlaylistMutationBusy("create-global");
+    try {
+      const response = await fetch("/api/admin/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setAccountMessage(payload.message || "Unable to create global playlist");
+        return;
+      }
+      setGlobalPlaylistNameInput("");
+      setGlobalPlaylists((current) => [payload.playlist, ...current]);
+      setSelectedGlobalPlaylistTarget(payload.playlist.id);
+    } finally {
+      setPlaylistMutationBusy("");
     }
-    setGlobalPlaylistNameInput("");
-    setGlobalPlaylists((current) => [payload.playlist, ...current]);
-    setSelectedGlobalPlaylistTarget(payload.playlist.id);
   };
 
   const addSongToPlaylistById = async (playlistId, song) => {
@@ -1793,7 +1874,8 @@ function App() {
   };
 
   const importSpotifyPlaylist = async () => {
-    if (!user() || !spotifyImportUrl().trim()) {
+    const normalizedUrl = sanitizeSpotifyPlaylistUrl(spotifyImportUrl());
+    if (!user() || !normalizedUrl) {
       return;
     }
     if (!spotifyConnected()) {
@@ -1809,7 +1891,7 @@ function App() {
     const response = await fetch("/api/playlists/import/spotify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: spotifyImportUrl().trim(), accessToken }),
+      body: JSON.stringify({ url: normalizedUrl, accessToken }),
     });
     const payload = await response.json();
     if (!response.ok) {
@@ -1842,6 +1924,11 @@ function App() {
     if (!playlistId) {
       return;
     }
+    if (playlistDetailAbortController) {
+      playlistDetailAbortController.abort();
+    }
+    const controller = new AbortController();
+    playlistDetailAbortController = controller;
     const requestToken = ++playlistDetailRequestToken;
     setQuery("");
     setMovieFilter("");
@@ -1874,13 +1961,26 @@ function App() {
 
     setPlaylistDetailLoading(true);
     try {
-      const response = await fetch(`/api/playlists/${playlistId}`);
-      const payload = await response.json().catch(() => ({}));
+      let response = null;
+      let payload = {};
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        response = await fetch(`/api/playlists/${playlistId}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        payload = await response.json().catch(() => ({}));
+        if (response.ok || controller.signal.aborted || attempt === 1) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 180));
+      }
       if (requestToken !== playlistDetailRequestToken) {
         return;
       }
       if (!response.ok) {
-        setGlobalPlaylistDetail(null);
+        if (!cachedPlaylist) {
+          setGlobalPlaylistDetail(null);
+        }
         setPlaylistDetailError(payload.message || "Unable to load playlist");
         setAccountMessage(payload.message || "Unable to load playlist");
         return;
@@ -1906,13 +2006,21 @@ function App() {
       setSelectedGlobalPlaylistTarget(nextPlaylist.id || playlistId);
       prefetchSongIds((nextPlaylist.tracks || []).slice(0, 8).map((track) => track.id));
     } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
       if (requestToken !== playlistDetailRequestToken) {
         return;
       }
-      setGlobalPlaylistDetail(null);
+      if (!cachedPlaylist) {
+        setGlobalPlaylistDetail(null);
+      }
       setPlaylistDetailError(error?.message || "Unable to load playlist");
       setAccountMessage(error?.message || "Unable to load playlist");
     } finally {
+      if (playlistDetailAbortController === controller) {
+        playlistDetailAbortController = null;
+      }
       if (requestToken === playlistDetailRequestToken) {
         setPlaylistDetailLoading(false);
       }
@@ -1930,87 +2038,117 @@ function App() {
   };
 
   const removeSongFromPlaylist = async (playlistId, songId) => {
-    if (!canManageVisiblePlaylist()) {
+    const mutationKey = `remove:${playlistId}:${songId}`;
+    if (!canManageVisiblePlaylist() || playlistMutationBusy()) {
       return;
     }
-    const response = await fetch(`/api/playlists/${playlistId}/songs/${songId}`, { method: "DELETE" });
-    if (!response.ok) {
-      setAccountMessage("Unable to remove song from playlist");
-      return;
+    setPlaylistMutationBusy(mutationKey);
+    try {
+      const response = await fetch(`/api/playlists/${playlistId}/songs/${songId}`, { method: "DELETE" });
+      if (!response.ok) {
+        setAccountMessage("Unable to remove song from playlist");
+        return;
+      }
+      await refreshAccountState();
+      await openGlobalPlaylist(playlistId);
+    } finally {
+      setPlaylistMutationBusy("");
     }
-    await refreshAccountState();
-    await openGlobalPlaylist(playlistId);
   };
 
   const clearVisiblePlaylist = async () => {
     const playlist = globalPlaylistDetail();
-    if (!playlist || !canManageVisiblePlaylist()) {
+    if (!playlist || !canManageVisiblePlaylist() || playlistMutationBusy()) {
       return;
     }
-    const response = await fetch(`/api/playlists/${playlist.id}/songs`, { method: "DELETE" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setAccountMessage(payload.message || "Unable to clear playlist");
-      return;
+    setPlaylistMutationBusy(`clear:${playlist.id}`);
+    try {
+      const response = await fetch(`/api/playlists/${playlist.id}/songs`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setAccountMessage(payload.message || "Unable to clear playlist");
+        return;
+      }
+      await refreshAccountState();
+      await openGlobalPlaylist(playlist.id);
+      setAccountMessage("Playlist cleared");
+    } finally {
+      setPlaylistMutationBusy("");
     }
-    await refreshAccountState();
-    await openGlobalPlaylist(playlist.id);
-    setAccountMessage("Playlist cleared");
   };
 
   const deleteVisiblePlaylist = async () => {
     const playlist = globalPlaylistDetail();
-    if (!playlist || !canManageVisiblePlaylist()) {
+    if (!playlist || !canManageVisiblePlaylist() || playlistMutationBusy()) {
       return;
     }
-    const response = await fetch(`/api/playlists/${playlist.id}`, { method: "DELETE" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setAccountMessage(payload.message || "Unable to delete playlist");
-      return;
+    setPlaylistMutationBusy(`delete:${playlist.id}`);
+    try {
+      const response = await fetch(`/api/playlists/${playlist.id}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setAccountMessage(payload.message || "Unable to delete playlist");
+        return;
+      }
+      await refreshAccountState();
+      closeGlobalPlaylist();
+      setSelectedGlobalPlaylistTarget("");
+      setAccountMessage("Playlist deleted");
+    } finally {
+      setPlaylistMutationBusy("");
     }
-    await refreshAccountState();
-    closeGlobalPlaylist();
-    setSelectedGlobalPlaylistTarget("");
-    setAccountMessage("Playlist deleted");
   };
 
   const renamePlaylistLocal = async () => {
-    if (!user() || !globalPlaylistDetail()) {
+    const playlist = globalPlaylistDetail();
+    if (!user() || !playlist || playlistMutationBusy()) {
       return;
     }
-    const response = await fetch(`/api/playlists/${globalPlaylistDetail().id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: globalPlaylistNameEdit().trim() }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      setAccountMessage(payload.message || "Unable to rename playlist");
-      return;
+    const name = sanitizePlaylistName(globalPlaylistNameEdit());
+    setPlaylistMutationBusy(`rename:${playlist.id}`);
+    try {
+      const response = await fetch(`/api/playlists/${playlist.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setAccountMessage(payload.message || "Unable to rename playlist");
+        return;
+      }
+      await refreshAccountState();
+      await openGlobalPlaylist(playlist.id);
+      setAccountMessage("Playlist renamed");
+    } finally {
+      setPlaylistMutationBusy("");
     }
-    await refreshAccountState();
-    await openGlobalPlaylist(globalPlaylistDetail().id);
-    setAccountMessage("Playlist renamed");
   };
 
   const renameGlobalPlaylist = async () => {
-    if (!user()?.is_admin || !globalPlaylistDetail()) {
+    const playlist = globalPlaylistDetail();
+    if (!user()?.is_admin || !playlist || playlistMutationBusy()) {
       return;
     }
-    const response = await fetch(`/api/playlists/${globalPlaylistDetail().id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: globalPlaylistNameEdit().trim() }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      setAdminMessage(payload.message || "Unable to rename playlist");
-      return;
+    const name = sanitizePlaylistName(globalPlaylistNameEdit());
+    setPlaylistMutationBusy(`rename:${playlist.id}`);
+    try {
+      const response = await fetch(`/api/playlists/${playlist.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setAdminMessage(payload.message || "Unable to rename playlist");
+        return;
+      }
+      await refreshAccountState();
+      await openGlobalPlaylist(playlist.id);
+      setAdminMessage("Playlist renamed");
+    } finally {
+      setPlaylistMutationBusy("");
     }
-    await refreshAccountState();
-    await openGlobalPlaylist(globalPlaylistDetail().id);
-    setAdminMessage("Playlist renamed");
   };
 
   const moveGlobalPlaylistSong = async (songId, direction) => {
@@ -2114,7 +2252,8 @@ function App() {
       return;
     }
 
-    const isSameSong = currentTrackId() === song.id;
+    const previousTrackId = currentTrackId();
+    const isSameSong = previousTrackId === song.id;
     setSelectedId(song.id);
     setCurrentTrackId(song.id);
     rememberRecentSong(song.id);
@@ -2123,25 +2262,39 @@ function App() {
     const version = encodeURIComponent(song.updatedAt || song.id);
     const nextRelativeUrl = `${song.audioUrl}?v=${version}`;
     const nextUrl = new URL(nextRelativeUrl, window.location.origin).href;
+    const canCrossfade = Boolean(
+      allowCrossfade &&
+      autoplay &&
+      activeAudio.src &&
+      !activeAudio.paused &&
+      previousTrackId &&
+      previousTrackId !== song.id
+    );
     if (activeAudio.src !== nextUrl) {
-      const canCrossfade = Boolean(
-        allowCrossfade &&
-        autoplay &&
-        activeAudio.src &&
-        !activeAudio.paused &&
-        currentTrackId() &&
-        currentTrackId() !== song.id
-      );
       stopCrossfade();
       setCurrentTime(0);
       setDuration(0);
       setStreamStarted(false);
       if (!canCrossfade) {
+        activeAudio.dataset.songId = song.id;
+      }
+      if (!canCrossfade) {
+        if (autoplay) {
+          void playPrimaryDeck(activeAudio, song, nextRelativeUrl).catch(() => {
+            setIsPlaying(false);
+            setStreamStarted(false);
+          });
+          return;
+        }
         activeAudio.pause();
         activeAudio.currentTime = 0;
-        activeAudio.removeAttribute("src");
-        activeAudio.dataset.songId = "";
+        activeAudio.src = nextRelativeUrl;
+        activeAudio.dataset.songId = song.id;
+        activeAudio.preload = "auto";
         activeAudio.load();
+        resetInactiveDeck();
+        syncTimelineFromAudio(activeAudio, true);
+        return;
       }
       inactiveAudio.pause();
       inactiveAudio.dataset.songId = song.id;
@@ -2177,19 +2330,7 @@ function App() {
               syncTimelineFromAudio(activeAudio);
               return;
             }
-            activeAudio.pause();
-            activeAudio.currentTime = 0;
-            activeAudio.dataset.songId = song.id;
-            activeAudio.src = nextRelativeUrl;
-            activeAudio.preload = "auto";
-            activeAudio.load();
-            syncTimelineFromAudio(activeAudio, true);
-            void activeAudio.play()
-              .then(() => {
-                setIsPlaying(true);
-                setStreamStarted(true);
-                syncTimelineFromAudio(activeAudio, true);
-              })
+            void playPrimaryDeck(activeAudio, song, nextRelativeUrl)
               .catch(() => {
                 setIsPlaying(false);
                 setStreamStarted(false);
@@ -2202,6 +2343,7 @@ function App() {
       return;
     }
 
+    activeAudio.dataset.songId = song.id;
     if (autoplay) {
       if (activeAudio.readyState < 2) {
         activeAudio.load();
@@ -2217,6 +2359,9 @@ function App() {
     if (!song || !activeAudio || isPlaying()) {
       return;
     }
+    if (isSongLoadedInAnyDeck(song.id)) {
+      return;
+    }
 
     prefetchSongIds(getSongNeighborhoodIds(song));
 
@@ -2224,6 +2369,7 @@ function App() {
     const nextRelativeUrl = `${song.audioUrl}?v=${version}`;
     const nextUrl = new URL(nextRelativeUrl, window.location.origin).href;
     if (activeAudio.src === nextUrl) {
+      activeAudio.dataset.songId = song.id;
       if (activeAudio.preload !== "auto") {
         activeAudio.preload = "auto";
       }
@@ -2616,6 +2762,7 @@ function App() {
 
       if (initialSongs[0] && getActiveAudio()) {
         const version = encodeURIComponent(initialSongs[0].updatedAt || initialSongs[0].id);
+        getActiveAudio().dataset.songId = initialSongs[0].id;
         getActiveAudio().src = `${initialSongs[0].audioUrl}?v=${version}`;
         getActiveAudio().preload = "auto";
         syncDeckVolumes();
@@ -2727,6 +2874,17 @@ function App() {
     void refreshDbSyncStatus();
     dbSyncPollTimer = setInterval(() => {
       void refreshDbSyncStatus();
+    }, 15000);
+  });
+
+  createEffect(() => {
+    clearInterval(healthPollTimer);
+    if (!localMode()) {
+      return;
+    }
+    void verifyAppOnline();
+    healthPollTimer = setInterval(() => {
+      void verifyAppOnline();
     }, 15000);
   });
 
@@ -3282,14 +3440,18 @@ function App() {
                 <span class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Global playlists</span>
                 <input
                   value={globalPlaylistNameInput()}
-                  onInput={(event) => setGlobalPlaylistNameInput(event.currentTarget.value)}
+                  onInput={(event) => setGlobalPlaylistNameInput(sanitizePlaylistName(event.currentTarget.value))}
                   placeholder="New global playlist"
+                  maxLength={PLAYLIST_NAME_MAX_LENGTH}
                   class="min-w-[180px] bg-transparent font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
                 />
                 <button
                   type="button"
                   onClick={() => void createGlobalPlaylist()}
-                  class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+                  disabled={playlistMutationBusy() === "create-global"}
+                  class={`font-mono text-[10px] uppercase tracking-[0.22em] transition ${
+                    playlistMutationBusy() === "create-global" ? "cursor-not-allowed text-[var(--line)]" : "text-[var(--soft)] hover:text-[var(--fg)]"
+                  }`}
                 >
                   Create global
                 </button>
@@ -3356,14 +3518,18 @@ function App() {
                   </Show>
                   <input
                     value={radioSaveName()}
-                    onInput={(event) => setRadioSaveName(event.currentTarget.value)}
+                    onInput={(event) => setRadioSaveName(sanitizePlaylistName(event.currentTarget.value))}
                     placeholder="Playlist name"
+                    maxLength={PLAYLIST_NAME_MAX_LENGTH}
                     class="min-w-[180px] bg-transparent font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
                   />
                   <button
                     type="button"
                     onClick={() => void saveRadioStationWithMode()}
-                    class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+                    disabled={playlistMutationBusy() === "radio-save"}
+                    class={`font-mono text-[10px] uppercase tracking-[0.22em] transition ${
+                      playlistMutationBusy() === "radio-save" ? "cursor-not-allowed text-[var(--line)]" : "text-[var(--soft)] hover:text-[var(--fg)]"
+                    }`}
                   >
                     Save radio
                   </button>
@@ -3402,13 +3568,17 @@ function App() {
                           <div class="flex flex-wrap items-center gap-2">
                             <input
                               value={globalPlaylistNameEdit()}
-                              onInput={(event) => setGlobalPlaylistNameEdit(event.currentTarget.value)}
+                              onInput={(event) => setGlobalPlaylistNameEdit(sanitizePlaylistName(event.currentTarget.value))}
+                              maxLength={PLAYLIST_NAME_MAX_LENGTH}
                               class="min-w-[180px] bg-transparent font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
                             />
                             <button
                               type="button"
                               onClick={() => void renameGlobalPlaylist()}
-                              class="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+                              disabled={playlistMutationBusy() === `rename:${playlist().id}`}
+                              class={`font-mono text-[10px] uppercase tracking-[0.2em] transition ${
+                                playlistMutationBusy() === `rename:${playlist().id}` ? "cursor-not-allowed text-[var(--line)]" : "text-[var(--soft)] hover:text-[var(--fg)]"
+                              }`}
                             >
                               Rename
                             </button>
@@ -3839,15 +4009,19 @@ function App() {
                     <div class="flex items-center gap-2">
                       <input
                         value={playlistNameInput()}
-                        onInput={(event) => setPlaylistNameInput(event.currentTarget.value)}
+                        onInput={(event) => setPlaylistNameInput(sanitizePlaylistName(event.currentTarget.value))}
                         onKeyDown={(event) => { if (event.key === "Enter") void createPlaylist(); }}
                         placeholder="New playlist name"
+                        maxLength={PLAYLIST_NAME_MAX_LENGTH}
                         class="min-w-0 flex-1 border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
                       />
                       <button
                         type="button"
                         onClick={() => void createPlaylist()}
-                        class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                        disabled={playlistCreateBusy()}
+                        class={`border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition ${
+                          playlistCreateBusy() ? "cursor-not-allowed border-[var(--line-soft)] text-[var(--line)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                        }`}
                       >
                         +
                       </button>
@@ -3915,14 +4089,42 @@ function App() {
                               <div class="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">
                                 <input
                                   value={globalPlaylistNameEdit()}
-                                  onInput={(event) => setGlobalPlaylistNameEdit(event.currentTarget.value)}
+                                  onInput={(event) => setGlobalPlaylistNameEdit(sanitizePlaylistName(event.currentTarget.value))}
                                   onKeyDown={(event) => { if (event.key === "Enter") void renamePlaylistLocal(); }}
                                   placeholder="Rename"
+                                  maxLength={PLAYLIST_NAME_MAX_LENGTH}
                                   class="min-w-[120px] border border-[var(--line)] bg-transparent px-2 py-1 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
                                 />
-                                <button type="button" onClick={() => void renamePlaylistLocal()} class="transition hover:text-[var(--fg)]">Rename</button>
-                                <button type="button" onClick={() => void clearVisiblePlaylist()} class="transition hover:text-[var(--fg)]">Clear</button>
-                                <button type="button" onClick={() => void deleteVisiblePlaylist()} class="transition hover:text-[var(--fg)]">Delete</button>
+                                <button
+                                  type="button"
+                                  onClick={() => void renamePlaylistLocal()}
+                                  disabled={playlistMutationBusy() === `rename:${playlist().id}`}
+                                  class={`transition ${
+                                    playlistMutationBusy() === `rename:${playlist().id}` ? "cursor-not-allowed text-[var(--line)]" : "hover:text-[var(--fg)]"
+                                  }`}
+                                >
+                                  Rename
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void clearVisiblePlaylist()}
+                                  disabled={playlistMutationBusy() === `clear:${playlist().id}`}
+                                  class={`transition ${
+                                    playlistMutationBusy() === `clear:${playlist().id}` ? "cursor-not-allowed text-[var(--line)]" : "hover:text-[var(--fg)]"
+                                  }`}
+                                >
+                                  Clear
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void deleteVisiblePlaylist()}
+                                  disabled={playlistMutationBusy() === `delete:${playlist().id}`}
+                                  class={`transition ${
+                                    playlistMutationBusy() === `delete:${playlist().id}` ? "cursor-not-allowed text-[var(--line)]" : "hover:text-[var(--fg)]"
+                                  }`}
+                                >
+                                  Delete
+                                </button>
                               </div>
                             </div>
                           </section>
@@ -3972,7 +4174,9 @@ function App() {
                                           role="button"
                                           tabindex="-1"
                                           onClick={(event) => { event.stopPropagation(); void removeSongFromPlaylist(playlist().id, track.id); }}
-                                          class="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)] transition hover:text-[var(--fg)]"
+                                          class={`font-mono text-[10px] uppercase tracking-[0.18em] transition ${
+                                            playlistMutationBusy() === `remove:${playlist().id}:${track.id}` ? "cursor-not-allowed text-[var(--line)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
+                                          }`}
                                         >
                                           Remove
                                         </span>
@@ -4024,14 +4228,18 @@ function App() {
                   <div class="mt-4 flex items-center gap-2">
                     <input
                       value={playlistNameInput()}
-                      onInput={(event) => setPlaylistNameInput(event.currentTarget.value)}
+                      onInput={(event) => setPlaylistNameInput(sanitizePlaylistName(event.currentTarget.value))}
                       placeholder="New playlist"
+                      maxLength={PLAYLIST_NAME_MAX_LENGTH}
                       class="min-w-0 flex-1 border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
                     />
                     <button
                       type="button"
                       onClick={() => void createPlaylist()}
-                      class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                      disabled={playlistCreateBusy()}
+                      class={`border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition ${
+                        playlistCreateBusy() ? "cursor-not-allowed border-[var(--line-soft)] text-[var(--line)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                      }`}
                     >
                       Create
                     </button>
@@ -4138,14 +4346,20 @@ function App() {
                               <button
                                 type="button"
                                 onClick={() => void clearVisiblePlaylist()}
-                                class="transition hover:text-[var(--fg)]"
+                                disabled={playlistMutationBusy() === `clear:${playlist().id}`}
+                                class={`transition ${
+                                  playlistMutationBusy() === `clear:${playlist().id}` ? "cursor-not-allowed text-[var(--line)]" : "hover:text-[var(--fg)]"
+                                }`}
                               >
                                 Clear
                               </button>
                               <button
                                 type="button"
                                 onClick={() => void deleteVisiblePlaylist()}
-                                class="transition hover:text-[var(--fg)]"
+                                disabled={playlistMutationBusy() === `delete:${playlist().id}`}
+                                class={`transition ${
+                                  playlistMutationBusy() === `delete:${playlist().id}` ? "cursor-not-allowed text-[var(--line)]" : "hover:text-[var(--fg)]"
+                                }`}
                               >
                                 Delete
                               </button>
@@ -4775,7 +4989,7 @@ function App() {
                   createPlaylistInputRef = el;
                 }}
                 value={playlistNameInput()}
-                onInput={(event) => setPlaylistNameInput(event.currentTarget.value)}
+                onInput={(event) => setPlaylistNameInput(sanitizePlaylistName(event.currentTarget.value))}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     event.preventDefault();
@@ -4783,6 +4997,7 @@ function App() {
                   }
                 }}
                 placeholder="Playlist name"
+                maxLength={PLAYLIST_NAME_MAX_LENGTH}
                 class="w-full border border-[var(--line)] bg-transparent px-3 py-3 font-mono text-sm text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
               />
               <div class="flex items-center justify-end gap-3">
@@ -4799,7 +5014,10 @@ function App() {
                 <button
                   type="button"
                   onClick={() => void createPlaylist()}
-                  class="border border-[var(--fg)] px-4 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--fg)] transition hover:bg-[var(--fg)] hover:text-[var(--bg)]"
+                  disabled={playlistCreateBusy()}
+                  class={`border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.22em] transition ${
+                    playlistCreateBusy() ? "cursor-not-allowed border-[var(--line-soft)] text-[var(--line)]" : "border-[var(--fg)] text-[var(--fg)] hover:bg-[var(--fg)] hover:text-[var(--bg)]"
+                  }`}
                 >
                   {pendingPlaylistSongId() ? "Create and save" : "Create"}
                 </button>

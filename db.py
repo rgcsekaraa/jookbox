@@ -183,10 +183,7 @@ def _ensure_migrations(conn: duckdb.DuckDBPyConnection) -> None:
 def get_conn(path: str = DUCKDB_PATH, read_only: bool = False) -> duckdb.DuckDBPyConnection:
     """Open DuckDB connection. Creates file + schema on first call."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    # DuckDB rejects concurrent connections to the same file when some are opened
-    # read-only and others are opened read-write. Use read-write connections
-    # consistently in the app process to avoid runtime conflicts.
-    conn = duckdb.connect(path, read_only=False)
+    conn = duckdb.connect(path, read_only=read_only)
     if not read_only:
         conn.execute(_SCHEMA)
         _ensure_migrations(conn)

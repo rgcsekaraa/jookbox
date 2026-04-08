@@ -23,6 +23,7 @@ from urllib.parse import quote
 import duckdb
 import requests
 from bs4 import BeautifulSoup
+from fastapi.concurrency import run_in_threadpool
 from fastapi import FastAPI, Request as FastAPIRequest
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 import uvicorn
@@ -165,7 +166,7 @@ class IsaiboxAPI(FastAPI):
                 if inspect.iscoroutinefunction(fn):
                     result = await fn(**_request.path_params)
                 else:
-                    result = fn(**_request.path_params)
+                    result = await run_in_threadpool(fn, **_request.path_params)
                 return _normalize_response(result)
             finally:
                 _request_var.reset(token)
@@ -193,11 +194,15 @@ class IsaiboxAPI(FastAPI):
 app = IsaiboxAPI()
 download_lock = threading.Lock()
 active_downloads: set[str] = set()
+background_download_limit = max(1, int(os.environ.get("ISAIBOX_BACKGROUND_DOWNLOADS", "1") or "1"))
+background_download_slots = threading.Semaphore(background_download_limit)
 status_cache: dict[str, dict] = {}
 song_row_cache: dict[str, dict] = {}
 song_cache_lock = threading.Lock()
 refresh_lock = threading.Lock()
 refreshing_albums: set[str] = set()
+album_link_cache: dict[str, dict] = {}
+ALBUM_LINK_CACHE_TTL = timedelta(minutes=max(1, int(os.environ.get("ISAIBOX_ALBUM_LINK_CACHE_MINUTES", "15") or "15")))
 UPSTREAM_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -254,6 +259,7 @@ RADIO_STATION_CACHE_TTL = timedelta(hours=12)
 RADIO_SHARED_SONG_SECONDS = 240
 AI_PLAYLIST_COUNT = 50
 AI_PLAYLIST_SONG_COUNT = 50
+PLAYLIST_NAME_MAX_LENGTH = 120
 db_sync_lock = threading.Lock()
 db_sync_state_lock = threading.Lock()
 db_sync_thread_started = False
@@ -1081,6 +1087,26 @@ def create_or_update_global_playlist(
     }
 
 
+def normalize_playlist_name(name: str, *, field_label: str = "Playlist name") -> str:
+    cleaned = re.sub(r"[\x00-\x1f\x7f]+", " ", str(name or ""))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        raise ValueError(f"{field_label} is required")
+    if len(cleaned) > PLAYLIST_NAME_MAX_LENGTH:
+        raise ValueError(f"{field_label} must be {PLAYLIST_NAME_MAX_LENGTH} characters or fewer")
+    return cleaned
+
+
+def normalize_spotify_playlist_url(playlist_url: str) -> str:
+    cleaned = re.sub(r"\s+", "", str(playlist_url or ""))
+    if not cleaned:
+        raise ValueError("Spotify playlist URL is required")
+    playlist_id = extract_spotify_playlist_id(cleaned)
+    if not playlist_id:
+        raise ValueError("Invalid Spotify playlist URL")
+    return f"https://open.spotify.com/playlist/{playlist_id}"
+
+
 def ensure_default_latest_2026_playlist() -> dict | None:
     with get_read_conn() as conn:
         rows = conn.execute(
@@ -1105,9 +1131,7 @@ def ensure_default_latest_2026_playlist() -> dict | None:
 
 
 def rename_playlist_for_user(user: dict, playlist_id: str, name: str) -> dict:
-    cleaned_name = (name or "").strip()
-    if not cleaned_name:
-        raise ValueError("Playlist name is required")
+    cleaned_name = normalize_playlist_name(name)
     with db.get_conn() as conn:
         playlist = conn.execute(
             "SELECT playlist_id, is_global, user_id, source, source_url FROM playlists WHERE playlist_id = ?",
@@ -1152,7 +1176,7 @@ def create_global_playlist_from_radio_station(owner_user_id: str, station_id: st
     station = next((item for item in payload.get("stations", []) if item.get("id") == station_id), None)
     if not station:
         raise ValueError("Radio station not found")
-    playlist_name = (name or station["name"]).strip() or station["name"]
+    playlist_name = normalize_playlist_name(name or station["name"])
     if mode == "overwrite":
         if not target_playlist_id:
             raise ValueError("Target playlist is required for overwrite")
@@ -2463,35 +2487,46 @@ def resolve_spotify_playlist_tracks_api(access_token: str, playlist_id: str) -> 
     return playlist_name, tracks
 
 
+def fetch_song_row(song_id: str) -> dict | None:
+    if not song_id:
+        return None
+    with get_read_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT song_id, album_url, track_number, track_name, url_320kbps, movie_name, updated_at
+            FROM songs
+            WHERE song_id = ? AND url_320kbps IS NOT NULL AND url_320kbps != ''
+            """,
+            [song_id],
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "song_id": row[0],
+        "album_url": row[1],
+        "track_number": row[2],
+        "track_name": row[3],
+        "url_320kbps": row[4],
+        "movie_name": row[5],
+        "updated_at": row[6],
+    }
+
+
 def ensure_song_row_cache() -> None:
-    if song_row_cache:
-        return
-    with song_cache_lock:
-        if song_row_cache:
-            return
-        with get_read_conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT song_id, album_url, track_number, track_name, url_320kbps, movie_name, updated_at
-                FROM songs
-                WHERE url_320kbps IS NOT NULL AND url_320kbps != ''
-                """
-            ).fetchall()
-        for row in rows:
-            song_row_cache[row[0]] = {
-                "song_id": row[0],
-                "album_url": row[1],
-                "track_number": row[2],
-                "track_name": row[3],
-                "url_320kbps": row[4],
-                "movie_name": row[5],
-                "updated_at": row[6],
-            }
+    return
 
 
 def get_song_row(song_id: str) -> dict | None:
-    ensure_song_row_cache()
-    return song_row_cache.get(song_id)
+    with song_cache_lock:
+        cached = song_row_cache.get(song_id)
+        if cached:
+            return dict(cached)
+    row = fetch_song_row(song_id)
+    if row:
+        with song_cache_lock:
+            song_row_cache[song_id] = row
+        return dict(row)
+    return None
 
 
 def invalidate_song_cache(song_id: str | None = None) -> None:
@@ -2502,6 +2537,102 @@ def invalidate_song_cache(song_id: str | None = None) -> None:
         else:
             song_row_cache.clear()
             status_cache.clear()
+
+
+def update_song_row_cache(song_id: str, patch: dict) -> dict | None:
+    if not song_id or not patch:
+        return get_song_row(song_id)
+    current = dict(get_song_row(song_id) or {})
+    with song_cache_lock:
+        if not current:
+            return None
+        current.update({key: value for key, value in patch.items() if value is not None})
+        song_row_cache[song_id] = current
+        return dict(current)
+
+
+def get_cached_album_links(album_url: str) -> tuple[dict | None, list[dict]] | None:
+    if not album_url:
+        return None
+    with refresh_lock:
+        entry = album_link_cache.get(album_url)
+        if not entry:
+            return None
+        fetched_at = entry.get("fetched_at")
+        if not fetched_at or now_utc() - fetched_at > ALBUM_LINK_CACHE_TTL:
+            album_link_cache.pop(album_url, None)
+            return None
+        return entry.get("album") or {}, list(entry.get("songs") or [])
+
+
+def fetch_album_links(album_url: str, *, force_refresh: bool = False) -> tuple[dict | None, list[dict]]:
+    cached = None if force_refresh else get_cached_album_links(album_url)
+    if cached:
+        return cached
+
+    with refresh_lock:
+        if album_url in refreshing_albums:
+            waiter = True
+        else:
+            refreshing_albums.add(album_url)
+            waiter = False
+
+    if waiter:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            time.sleep(0.1)
+            cached = None if force_refresh else get_cached_album_links(album_url)
+            if cached:
+                return cached
+            with refresh_lock:
+                if album_url not in refreshing_albums:
+                    break
+        cached = get_cached_album_links(album_url)
+        if cached:
+            return cached
+        with refresh_lock:
+            refreshing_albums.add(album_url)
+
+    try:
+        from curl_cffi import requests as cffi_requests
+
+        resp = cffi_requests.get(album_url, impersonate="chrome124", timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml")
+        album, songs = scraper_core.parse_album_page(soup, album_url)
+        payload = {
+            "album": album or {},
+            "songs": list(songs or []),
+            "fetched_at": now_utc(),
+        }
+        with refresh_lock:
+            album_link_cache[album_url] = payload
+        return payload["album"], list(payload["songs"])
+    finally:
+        with refresh_lock:
+            refreshing_albums.discard(album_url)
+
+
+def find_matching_album_song(row: dict, songs: list[dict]) -> dict | None:
+    normalized_track = normalize_text(row.get("track_name") or "")
+    track_number = row.get("track_number")
+
+    if track_number:
+        matched = next((song for song in songs if song.get("track_number") == track_number and song.get("url_320kbps")), None)
+        if matched:
+            return matched
+    if normalized_track:
+        matched = next(
+            (
+                song
+                for song in songs
+                if song.get("url_320kbps") and normalize_text(song.get("track_name") or "") == normalized_track
+            ),
+            None,
+        )
+        if matched:
+            return matched
+    return next((song for song in songs if song.get("url_320kbps")), None)
 
 
 def get_cache_path(song_id: str) -> Path:
@@ -2602,13 +2733,15 @@ def is_playable_upstream_response(response: requests.Response | None) -> bool:
     return response.status_code in (200, 206) and is_audio_content_type(content_type)
 
 
-def build_upstream_headers(song_id: str | None = None) -> dict[str, str]:
+def build_upstream_headers(song_id: str | None = None, album_url: str | None = None) -> dict[str, str]:
     headers = dict(UPSTREAM_HEADERS)
-    if song_id:
+    if album_url:
+        headers["Referer"] = album_url
+    elif song_id:
         row = get_song_row(song_id)
         if row and row.get("album_url"):
             headers["Referer"] = row["album_url"]
-    if has_request_context():
+    if has_request_context() and not LOCAL_MODE:
         for header in ("Range", "If-Range", "If-Modified-Since", "If-None-Match"):
             value = request.headers.get(header)
             if value:
@@ -2627,10 +2760,13 @@ def request_upstream(url: str, *, headers: dict[str, str], stream: bool, timeout
         # note: curl_cffi response objects mimic requests enough for our is_playable check
         return cffi_requests.get(url, impersonate="chrome124", **kwargs)
 
+    # Prefer curl_cffi ahead of cloudscraper for media URLs. cloudscraper can
+    # stall on expired/ranged downloader links, which blocks the live stream
+    # response long enough for the frontend player to sit in a permanent spinner.
     clients = (
+        ("curl_cffi", cffi_get),
         ("requests", requests.get),
         ("cloudscraper", scraper_core.get_session().get),
-        ("curl_cffi", cffi_get),
     )
 
     for source, client in clients:
@@ -2642,7 +2778,7 @@ def request_upstream(url: str, *, headers: dict[str, str], stream: bool, timeout
                 timeout=timeout,
                 allow_redirects=True,
             )
-        except requests.RequestException:
+        except Exception:
             app.logger.warning("Upstream %s request failed for %s", source, url, exc_info=True)
             continue
 
@@ -2738,10 +2874,6 @@ def get_stream_health(song_id: str, url: str) -> dict:
             response.headers.get("Content-Type"),
         )
         response.close()
-        refreshed = try_refresh_song_link(song_id)
-        refreshed_url = refreshed["url_320kbps"] if refreshed else url
-        response, source = request_upstream(refreshed_url or url, headers=headers, stream=True, timeout=(4, 10))
-        result = classify_upstream_response(response)
 
     if response is not None:
         response.close()
@@ -2749,49 +2881,62 @@ def get_stream_health(song_id: str, url: str) -> dict:
     return cache_status(song_id, result)
 
 
-def try_refresh_song_link(song_id: str) -> dict | None:
+def try_refresh_song_link(song_id: str, *, force_refresh: bool = False) -> dict | None:
     row = get_song_row(song_id)
     if not row:
         return None
 
     album_url = row["album_url"]
 
-    with refresh_lock:
-        if album_url in refreshing_albums:
-            # Wait a moment for other thread to finish
-            time.sleep(0.5)
-            return get_song_row(song_id)
-        refreshing_albums.add(album_url)
-
     app.logger.info("JIT Refreshing links for album: %s", album_url)
     try:
-        from curl_cffi import requests as cffi_requests
-        # Use curl_cffi for high-reliability fetching during JIT resolution
-        resp = cffi_requests.get(album_url, impersonate="chrome124", timeout=30)
-        resp.raise_for_status()
-        
-        soup = BeautifulSoup(resp.text, "lxml")
-        album, songs = scraper_core.parse_album_page(soup, album_url)
-        
-        with db.get_conn() as conn:
-            db.upsert_album(conn, album)
-            db.upsert_songs(conn, songs)
-            
-        invalidate_song_cache()
-        invalidate_library_match_cache()
+        album, songs = fetch_album_links(album_url, force_refresh=force_refresh)
+        refreshed_song = find_matching_album_song(row, songs)
+        if refreshed_song is None:
+            return row
+
+        updated = update_song_row_cache(
+            song_id,
+            {
+                "album_url": refreshed_song.get("album_url") or album_url,
+                "track_number": refreshed_song.get("track_number") or track_number,
+                "track_name": refreshed_song.get("track_name") or row.get("track_name"),
+                "url_320kbps": refreshed_song.get("url_320kbps") or row.get("url_320kbps"),
+                "movie_name": album.get("movie_name") or row.get("movie_name"),
+                "updated_at": now_utc(),
+            },
+        )
         app.logger.info("JIT Refresh successful for %s", row["movie_name"])
-        return get_song_row(song_id)
+        return updated or row
     except Exception:
         app.logger.warning("Failed to JIT refresh song link for %s", song_id, exc_info=True)
         return row
-    finally:
-        with refresh_lock:
-            refreshing_albums.discard(album_url)
 
 
-def download_song_to_cache(song_id: str, url: str) -> None:
+def resolve_song_row_for_playback(song_id: str, *, force_refresh: bool = False) -> dict | None:
+    row = get_song_row(song_id)
+    if not row:
+        return None
+    if not row.get("album_url"):
+        return row
+    return try_refresh_song_link(song_id, force_refresh=force_refresh) or row
+
+
+def try_refresh_song_link_with_timeout(song_id: str, timeout_seconds: float = 6.0, *, force_refresh: bool = False) -> dict | None:
+    future_timeout = max(0.5, float(timeout_seconds))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(try_refresh_song_link, song_id, force_refresh=force_refresh)
+        try:
+            return future.result(timeout=future_timeout)
+        except Exception:
+            app.logger.warning("Timed out refreshing song link for %s after %.1fs", song_id, future_timeout, exc_info=True)
+            return get_song_row(song_id)
+
+
+def download_song_to_cache(song_id: str, url: str | None = None) -> None:
     final_path = get_cache_path(song_id)
     temp_path = final_path.with_suffix(".part")
+    acquired_slot = False
 
     if is_cached(song_id):
         return
@@ -2802,6 +2947,14 @@ def download_song_to_cache(song_id: str, url: str) -> None:
         active_downloads.add(song_id)
 
     try:
+        if not background_download_slots.acquire(timeout=1.0):
+            return
+        acquired_slot = True
+        resolved = resolve_song_row_for_playback(song_id)
+        if resolved and resolved.get("url_320kbps"):
+            url = resolved["url_320kbps"]
+        if not url:
+            return
         headers = build_upstream_headers(song_id)
         upstream, source = request_upstream(url, headers=headers, stream=True, timeout=(5, 60))
         if not is_playable_upstream_response(upstream):
@@ -2814,9 +2967,7 @@ def download_song_to_cache(song_id: str, url: str) -> None:
                     upstream.headers.get("Content-Type"),
                 )
                 upstream.close()
-            refreshed = try_refresh_song_link(song_id)
-            refreshed_url = refreshed["url_320kbps"] if refreshed else url
-            upstream, source = request_upstream(refreshed_url or url, headers=headers, stream=True, timeout=(5, 60))
+            return
         if not is_playable_upstream_response(upstream):
             if upstream is not None:
                 app.logger.warning(
@@ -2827,11 +2978,13 @@ def download_song_to_cache(song_id: str, url: str) -> None:
                 )
                 upstream.close()
             return
-        with upstream:
+        try:
             with temp_path.open("wb") as output:
                 for chunk in upstream.iter_content(chunk_size=128 * 1024):
                     if chunk:
                         output.write(chunk)
+        finally:
+            upstream.close()
         if cache_file_looks_valid(temp_path):
             temp_path.replace(final_path)
             cache_status(song_id, {"status": "healthy", "label": "green"})
@@ -2844,11 +2997,13 @@ def download_song_to_cache(song_id: str, url: str) -> None:
         if temp_path.exists():
             temp_path.unlink()
     finally:
+        if acquired_slot:
+            background_download_slots.release()
         with download_lock:
             active_downloads.discard(song_id)
 
 
-def ensure_song_cached_async(song_id: str, url: str) -> None:
+def ensure_song_cached_async(song_id: str, url: str | None = None) -> None:
     if is_cached(song_id):
         return
     if restore_from_shared_cache(song_id):
