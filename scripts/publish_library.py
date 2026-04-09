@@ -4,8 +4,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Ensure the repository root (parent of scripts/) is importable so ``import db`` works
+# regardless of the working directory Python uses to populate sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import duckdb
 import db
