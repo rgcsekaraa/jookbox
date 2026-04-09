@@ -807,8 +807,10 @@ function App() {
   };
 
   const visibleResults = createMemo(() => {
-    const resultSongs = results().songs || [];
-    const filteredByAlbum = movieFilter() ? resultSongs.filter((song) => song.movie === movieFilter()) : resultSongs;
+    const sourceSongs = movieFilter() || artistFilter() || musicDirectorFilter()
+      ? songs()
+      : (results().songs || []);
+    const filteredByAlbum = movieFilter() ? sourceSongs.filter((song) => song.movie === movieFilter()) : sourceSongs;
     const filteredByArtist = artistFilter()
       ? filteredByAlbum.filter((song) => normalizeText(song.singers).includes(normalizeText(artistFilter())))
       : filteredByAlbum;
@@ -817,8 +819,38 @@ function App() {
       : filteredByArtist;
     return filteredByDirector.slice(0, 200);
   });
-  const visibleAlbums = createMemo(() => results().albums || []);
-  const visibleArtists = createMemo(() => results().artists || []);
+  const visibleAlbums = createMemo(() => {
+    if (musicDirectorFilter() || artistFilter()) {
+      const grouped = new Map();
+      for (const song of visibleResults()) {
+        const existing = grouped.get(song.movie);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          grouped.set(song.movie, { album: song.movie, musicDirector: song.musicDirector, year: song.year, count: 1 });
+        }
+      }
+      return Array.from(grouped.values()).sort((a, b) => b.count - a.count || a.album.localeCompare(b.album));
+    }
+    return results().albums || [];
+  });
+  const visibleArtists = createMemo(() => {
+    if (musicDirectorFilter() || movieFilter()) {
+      const grouped = new Map();
+      for (const song of visibleResults()) {
+        for (const singer of (song.singers || "").split(/,|&|\/| feat\. | featuring /i).map((s) => s.trim()).filter(Boolean)) {
+          const existing = grouped.get(singer);
+          if (existing) {
+            existing.count += 1;
+          } else {
+            grouped.set(singer, { artist: singer, count: 1 });
+          }
+        }
+      }
+      return Array.from(grouped.values()).sort((a, b) => b.count - a.count || a.artist.localeCompare(b.artist));
+    }
+    return results().artists || [];
+  });
   const songIndex = createMemo(() => new Map(songs().map((song) => [song.id, song])));
   const recentSongs = createMemo(() => recentIds().map((id) => songIndex().get(id)).filter(Boolean));
   const favoriteSongs = createMemo(() => favoriteIds().map((id) => songIndex().get(id)).filter(Boolean));
@@ -936,6 +968,7 @@ function App() {
       ...current,
       {
         mainTab: mainTab(),
+        query: query(),
         searchTab: searchTab(),
         movieFilter: movieFilter(),
         artistFilter: artistFilter(),
@@ -955,6 +988,7 @@ function App() {
     }
     pushLibraryNavState();
     setMainTab("library");
+    setQuery("");
     setSearchTab("songs");
     setMovieFilter(nextMovie);
     setArtistFilter("");
@@ -971,7 +1005,8 @@ function App() {
     }
     pushLibraryNavState();
     setMainTab("library");
-    setSearchTab("songs");
+    setQuery("");
+    setSearchTab("albums");
     setMovieFilter("");
     setArtistFilter("");
     setMusicDirectorFilter(nextDirector);
@@ -985,6 +1020,7 @@ function App() {
     }
     setLibraryNavStack((current) => current.slice(0, -1));
     setMainTab(previous.mainTab || "library");
+    setQuery(previous.query || "");
     setSearchTab(previous.searchTab || "songs");
     setMovieFilter(previous.movieFilter || "");
     setArtistFilter(previous.artistFilter || "");
@@ -4614,21 +4650,21 @@ function App() {
                     </>
                   )}
                 </Show>
-                <Show when={!playlistDetailLoading() && (!showPlaylistDetail() || query().trim() || movieFilter() || artistFilter() || musicDirectorFilter()) && !playlistDetailError()}>
+                <Show when={!playlistDetailLoading() && (!showPlaylistDetail() || query().trim() || movieFilter() || artistFilter() || musicDirectorFilter() || libraryNavStack().length > 0) && !playlistDetailError()}>
                 <section class="border-b border-[var(--line-soft)] px-4 py-3">
                   <div class="flex items-center gap-4 font-mono text-[10px] uppercase tracking-[0.22em]">
                     <button type="button" onClick={() => setSearchTab("songs")} class={searchTab() === "songs" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Songs</button>
-                    <button type="button" onClick={() => setSearchTab("albums")} class={searchTab() === "albums" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Albums</button>
-                    <button type="button" onClick={() => setSearchTab("artists")} class={searchTab() === "artists" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Artists</button>
+                    <button type="button" onClick={() => setSearchTab("albums")} class={searchTab() === "albums" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Movies</button>
+                    <button type="button" onClick={() => setSearchTab("artists")} class={searchTab() === "artists" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Singers</button>
                   </div>
                 </section>
 
-                <Show when={query().trim() || movieFilter() || artistFilter() || musicDirectorFilter()}>
+                <Show when={query().trim() || movieFilter() || artistFilter() || musicDirectorFilter() || libraryNavStack().length > 0}>
                   <section class="border-b border-[var(--line-soft)] px-4 py-4">
                     <div class="flex items-center justify-between gap-4">
                       <div class="min-w-0">
                         <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
-                          {movieFilter() ? "Filtered by album" : musicDirectorFilter() ? "Filtered by music director" : artistFilter() ? "Filtered by artist" : "Search filters"}
+                          {movieFilter() ? "Filtered by movie" : musicDirectorFilter() ? "Filtered by music director" : artistFilter() ? "Filtered by singer" : libraryNavStack().length > 0 ? "" : "Search filters"}
                         </div>
                         <Show when={movieFilter()}>
                           <div class="mt-1 truncate text-sm text-[var(--fg)]">{movieFilter()}</div>
@@ -4640,7 +4676,7 @@ function App() {
                           <div class="mt-1 truncate text-sm text-[var(--fg)]">{artistFilter()}</div>
                         </Show>
                         <Show when={!movieFilter() && !musicDirectorFilter() && query().trim()}>
-                          <div class="mt-1 text-xs text-[var(--soft)]">Songs, albums, and artists are separate views over the same results.</div>
+                          <div class="mt-1 text-xs text-[var(--soft)]">Songs, movies, and singers are separate views over the same results.</div>
                         </Show>
                       </div>
                       <div class="flex shrink-0 items-center gap-3">
@@ -4671,7 +4707,7 @@ function App() {
                     </div>
 
                     <div class="mt-3 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
-                      <span>{searchTab()}</span>
+                      <span>{searchTab() === "albums" ? "movies" : searchTab() === "artists" ? "singers" : searchTab()}</span>
                       <span>
                         {searchTab() === "songs"
                           ? visibleResults().length.toLocaleString()
@@ -4683,7 +4719,7 @@ function App() {
                   </section>
                 </Show>
 
-                <Show when={searchTab() === "songs" || movieFilter() || artistFilter() || musicDirectorFilter()}>
+                <Show when={searchTab() === "songs" || movieFilter()}>
                   <>
                     <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-4 py-2">
                       <SortableSongHeader columnKey="default" label="#" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-8 text-right" />
@@ -4761,7 +4797,7 @@ function App() {
                   </>
                 </Show>
 
-                <Show when={searchTab() === "albums" && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
+                <Show when={searchTab() === "albums" && !movieFilter()}>
                   <div class="flex flex-1 items-start overflow-y-auto p-4">
                     <div class="flex flex-wrap gap-2">
                       <For each={visibleAlbums()}>
@@ -4769,13 +4805,12 @@ function App() {
                           <button
                             type="button"
                             onClick={() => {
-                              setMovieFilter(album.album);
-                              setSearchTab("songs");
+                              navigateToMovie(album.album);
                             }}
                             class="border border-[var(--line)] px-3 py-2 text-left transition hover:border-[var(--fg)]"
                           >
                             <div class="text-sm">{album.album}</div>
-                            <div class="font-mono text-[10px] text-[var(--soft)]">{album.count} songs</div>
+                            <div class="font-mono text-[10px] text-[var(--soft)]">{album.count} songs · {album.year}</div>
                           </button>
                         )}
                       </For>
@@ -4783,7 +4818,7 @@ function App() {
                   </div>
                 </Show>
 
-                <Show when={searchTab() === "artists" && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
+                <Show when={searchTab() === "artists" && !artistFilter()}>
                   <div class="flex flex-1 items-start overflow-y-auto p-4">
                     <div class="flex flex-wrap gap-2">
                       <For each={visibleArtists()}>

@@ -26,6 +26,59 @@ const splitArtists = (value) =>
     .map((item) => item.trim())
     .filter(Boolean);
 
+const hasNearTypo = (left, right, maxDistance = 1) => {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  if (Math.abs(left.length - right.length) > maxDistance) return false;
+
+  const prev = new Array(right.length + 1);
+  const next = new Array(right.length + 1);
+  for (let j = 0; j <= right.length; j += 1) {
+    prev[j] = j;
+  }
+
+  for (let i = 1; i <= left.length; i += 1) {
+    next[0] = i;
+    let rowMin = next[0];
+    for (let j = 1; j <= right.length; j += 1) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      next[j] = Math.min(
+        prev[j] + 1,
+        next[j - 1] + 1,
+        prev[j - 1] + cost
+      );
+      rowMin = Math.min(rowMin, next[j]);
+    }
+    if (rowMin > maxDistance) {
+      return false;
+    }
+    for (let j = 0; j <= right.length; j += 1) {
+      prev[j] = next[j];
+    }
+  }
+
+  return prev[right.length] <= maxDistance;
+};
+
+const matchesLooseField = (value, normalizedQuery) => {
+  const normalizedValue = normalize(value);
+  if (!normalizedValue) return false;
+  if (!normalizedQuery) return true;
+  if (normalizedValue.includes(normalizedQuery)) return true;
+
+  const queryTokens = tokenize(normalizedQuery);
+  const valueTokens = tokenize(normalizedValue);
+  if (queryTokens.length && queryTokens.every((token) => valueTokens.some((candidate) =>
+    candidate.startsWith(token) ||
+    token.startsWith(candidate) ||
+    (token.length >= 4 && candidate.length >= 4 && hasNearTypo(token, candidate, 1))
+  ))) {
+    return true;
+  }
+
+  return false;
+};
+
 const uniqueBy = (items, getKey) => {
   const seen = new Set();
   return items.filter((item) => {
@@ -97,7 +150,7 @@ const buildIndex = (items) => {
   });
 
   fuse = new Fuse(items, {
-    threshold: 0.18,
+    threshold: 0.24,
     ignoreLocation: true,
     minMatchCharLength: 2,
     ignoreFieldNorm: false,
@@ -187,6 +240,9 @@ const scoreSong = (meta, tokens) => {
         if (token.startsWith(songToken) && songToken.length > 2) {
           tokenScore = Math.max(tokenScore, 10);
         }
+        if (token.length >= 4 && songToken.length >= 4 && hasNearTypo(token, songToken, 1)) {
+          tokenScore = Math.max(tokenScore, 12);
+        }
       }
     }
 
@@ -237,15 +293,10 @@ const strictSearch = (query) => {
     .map((entry) => entry.song);
 };
 
-const buildAlbumGroups = (items, query) => {
-  const normalizedQuery = normalize(query);
+const buildAlbumGroups = (items) => {
   const grouped = new Map();
 
   for (const song of items) {
-    const movie = normalize(song.movie);
-    if (!movie) continue;
-    if (normalizedQuery && !movie.includes(normalizedQuery)) continue;
-
     const existing = grouped.get(song.movie) || {
       album: song.movie,
       musicDirector: song.musicDirector,
@@ -261,15 +312,11 @@ const buildAlbumGroups = (items, query) => {
     .slice(0, 24);
 };
 
-const buildArtistGroups = (items, query) => {
-  const normalizedQuery = normalize(query);
+const buildArtistGroups = (items) => {
   const grouped = new Map();
 
   for (const song of items) {
     for (const singer of splitArtists(song.singers)) {
-      const normalizedSinger = normalize(singer);
-      if (!normalizedSinger) continue;
-      if (normalizedQuery && !normalizedSinger.includes(normalizedQuery)) continue;
       const existing = grouped.get(singer) || {
         artist: singer,
         count: 0
@@ -286,8 +333,8 @@ const buildArtistGroups = (items, query) => {
 
 const buildPayload = (query, matchedSongs) => ({
   songs: matchedSongs.slice(0, 200),
-  albums: buildAlbumGroups(matchedSongs.slice(0, 600), query),
-  artists: buildArtistGroups(matchedSongs.slice(0, 600), query)
+  albums: buildAlbumGroups(matchedSongs.slice(0, 600)),
+  artists: buildArtistGroups(matchedSongs.slice(0, 600))
 });
 
 self.onmessage = (event) => {
