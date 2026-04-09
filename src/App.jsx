@@ -3401,6 +3401,17 @@ function App() {
               </Show>
             </div>
           </Show>
+          <span class="group relative inline-flex">
+            <button
+              type="button"
+              onClick={() => setShowShortcutHelp(true)}
+              aria-label="Show keyboard shortcuts"
+              class="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
+            >
+              <HelpIcon />
+            </button>
+            <TooltipBubble text="Keyboard shortcuts" position="top-full left-1/2 -translate-x-1/2 mt-2" />
+          </span>
           <Show when={authEnabled()}>
           <Show
             when={user()}
@@ -4651,44 +4662,34 @@ function App() {
                   )}
                 </Show>
                 <Show when={!playlistDetailLoading() && (!showPlaylistDetail() || query().trim() || movieFilter() || artistFilter() || musicDirectorFilter() || libraryNavStack().length > 0) && !playlistDetailError()}>
-                <section class="border-b border-[var(--line-soft)] px-4 py-3">
-                  <div class="flex items-center gap-4 font-mono text-[10px] uppercase tracking-[0.22em]">
-                    <button type="button" onClick={() => setSearchTab("songs")} class={searchTab() === "songs" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Songs</button>
-                    <button type="button" onClick={() => setSearchTab("albums")} class={searchTab() === "albums" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Movies</button>
-                    <button type="button" onClick={() => setSearchTab("artists")} class={searchTab() === "artists" ? "text-[var(--fg)]" : "text-[var(--soft)]"}>Singers</button>
-                  </div>
-                </section>
 
                 <Show when={query().trim() || movieFilter() || artistFilter() || musicDirectorFilter() || libraryNavStack().length > 0}>
                   <section class="border-b border-[var(--line-soft)] px-4 py-4">
-                    <div class="flex items-center justify-between gap-4">
-                      <div class="min-w-0">
-                        <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
-                          {movieFilter() ? "Filtered by movie" : musicDirectorFilter() ? "Filtered by music director" : artistFilter() ? "Filtered by singer" : libraryNavStack().length > 0 ? "" : "Search filters"}
-                        </div>
+                    <div class="flex items-center gap-4">
+                      <Show when={libraryNavStack().length > 0}>
+                        <button
+                          type="button"
+                          onClick={restorePreviousLibraryView}
+                          class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+                        >
+                          ← Back
+                        </button>
+                      </Show>
+                      <div class="min-w-0 flex-1">
                         <Show when={movieFilter()}>
+                          <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Movie</div>
                           <div class="mt-1 truncate text-sm text-[var(--fg)]">{movieFilter()}</div>
                         </Show>
                         <Show when={!movieFilter() && musicDirectorFilter()}>
+                          <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Music director</div>
                           <div class="mt-1 truncate text-sm text-[var(--fg)]">{musicDirectorFilter()}</div>
                         </Show>
                         <Show when={!movieFilter() && !musicDirectorFilter() && artistFilter()}>
+                          <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Singer</div>
                           <div class="mt-1 truncate text-sm text-[var(--fg)]">{artistFilter()}</div>
-                        </Show>
-                        <Show when={!movieFilter() && !musicDirectorFilter() && query().trim()}>
-                          <div class="mt-1 text-xs text-[var(--soft)]">Songs, movies, and singers are separate views over the same results.</div>
                         </Show>
                       </div>
                       <div class="flex shrink-0 items-center gap-3">
-                        <Show when={libraryNavStack().length > 0}>
-                          <button
-                            type="button"
-                            onClick={restorePreviousLibraryView}
-                            class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--soft)] transition hover:text-[var(--fg)]"
-                          >
-                            Back
-                          </button>
-                        </Show>
                         <Show when={movieFilter() || artistFilter() || musicDirectorFilter()}>
                           <button
                             type="button"
@@ -4696,30 +4697,27 @@ function App() {
                               setMovieFilter("");
                               setArtistFilter("");
                               setMusicDirectorFilter("");
-                              setSearchTab("songs");
                             }}
                             class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--soft)] transition hover:text-[var(--fg)]"
                           >
-                            Clear filter
+                            Clear
                           </button>
                         </Show>
                       </div>
                     </div>
 
                     <div class="mt-3 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
-                      <span>{searchTab() === "albums" ? "movies" : searchTab() === "artists" ? "singers" : searchTab()}</span>
+                      <span>{musicDirectorFilter() && !movieFilter() ? "movies" : "songs"}</span>
                       <span>
-                        {searchTab() === "songs"
-                          ? visibleResults().length.toLocaleString()
-                          : searchTab() === "albums"
-                            ? visibleAlbums().length.toLocaleString()
-                            : visibleArtists().length.toLocaleString()} shown
+                        {musicDirectorFilter() && !movieFilter()
+                          ? visibleAlbums().length.toLocaleString()
+                          : visibleResults().length.toLocaleString()} shown
                       </span>
                     </div>
                   </section>
                 </Show>
 
-                <Show when={searchTab() === "songs" || movieFilter()}>
+                <Show when={!musicDirectorFilter() || movieFilter()}>
                   <>
                     <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-4 py-2">
                       <SortableSongHeader columnKey="default" label="#" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-8 text-right" />
@@ -4797,7 +4795,7 @@ function App() {
                   </>
                 </Show>
 
-                <Show when={searchTab() === "albums" && !movieFilter()}>
+                <Show when={musicDirectorFilter() && !movieFilter()}>
                   <div class="flex flex-1 items-start overflow-y-auto p-4">
                     <div class="flex flex-wrap gap-2">
                       <For each={visibleAlbums()}>
@@ -4811,28 +4809,6 @@ function App() {
                           >
                             <div class="text-sm">{album.album}</div>
                             <div class="font-mono text-[10px] text-[var(--soft)]">{album.count} songs · {album.year}</div>
-                          </button>
-                        )}
-                      </For>
-                    </div>
-                  </div>
-                </Show>
-
-                <Show when={searchTab() === "artists" && !artistFilter()}>
-                  <div class="flex flex-1 items-start overflow-y-auto p-4">
-                    <div class="flex flex-wrap gap-2">
-                      <For each={visibleArtists()}>
-                        {(artist) => (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setArtistFilter(artist.artist);
-                              setSearchTab("songs");
-                            }}
-                            class="border border-[var(--line)] px-3 py-2 text-left transition hover:border-[var(--fg)]"
-                          >
-                            <div class="text-sm">{artist.artist}</div>
-                            <div class="font-mono text-[10px] text-[var(--soft)]">{artist.count} songs</div>
                           </button>
                         )}
                       </For>
@@ -4971,17 +4947,6 @@ function App() {
 
         <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
           <div class="flex items-center gap-2">
-            <span class="group relative inline-flex">
-              <button
-                type="button"
-                onClick={() => setShowShortcutHelp(true)}
-                aria-label="Show keyboard shortcuts"
-                  class="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
-              >
-                <HelpIcon />
-              </button>
-              <TooltipBubble text="Keyboard shortcuts" position="bottom-full left-0 mb-2" />
-            </span>
             <Show when={user() && currentSong()}>
               <span class="group relative inline-flex">
                 <button
