@@ -3367,42 +3367,57 @@ function App() {
             aria-hidden="true"
             class="pointer-events-none absolute left-[-9999px] top-0 opacity-0"
           />
-          <Show when={localMode()}>
-            <div class="flex min-w-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowSettings(!showSettings())}
-                class={`rounded-full border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] transition ${
-                  showSettings() ? "border-[var(--fg)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)]"
-                }`}
-              >
-                Settings
-              </button>
-              <Show when={cacheNearFull() && !cacheFull()}>
-                <span class="rounded-full border border-yellow-500/40 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-yellow-500">
-                  Cache {cachePercent()}%
-                </span>
-              </Show>
-              <Show when={localDbSyncLabel()}>
-                <span
-                  class={`max-w-[220px] truncate rounded-full border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] ${localDbSyncTone()}`}
-                  title={dbSyncState()?.message || localDbSyncLabel()}
-                >
-                  {localDbSyncLabel()}
-                </span>
-              </Show>
-              <Show when={dbSyncState()?.status === "error" && dbSyncState()?.githubIssuesUrl}>
-                <a
-                  href={dbSyncState().githubIssuesUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  class="text-xs text-[var(--soft)] underline decoration-[var(--line)] underline-offset-4 transition hover:text-[var(--fg)]"
-                >
-                  Raise issue
-                </a>
-              </Show>
-            </div>
-          </Show>
+          <div class="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowSettings(!showSettings())}
+              class={`rounded-full border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] transition ${
+                showSettings() ? "border-[var(--fg)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)]"
+              }`}
+            >
+              Settings
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const choices = ["light", "dark", "system"];
+                const next = choices[(choices.indexOf(themePreference()) + 1) % choices.length];
+                void setThemePreferenceChoice(next);
+              }}
+              class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
+              title={`Theme: ${themePreference()}`}
+            >
+              <ThemeIcon theme={activeTheme()} />
+            </button>
+
+            <Show when={localMode()}>
+              <div class="flex min-w-0 items-center gap-2">
+                <Show when={cacheNearFull() && !cacheFull()}>
+                  <span class="rounded-full border border-yellow-500/40 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-yellow-500">
+                    Cache {cachePercent()}%
+                  </span>
+                </Show>
+                <Show when={localDbSyncLabel()}>
+                  <span
+                    class={`max-w-[220px] truncate rounded-full border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] ${localDbSyncTone()}`}
+                    title={dbSyncState()?.message || localDbSyncLabel()}
+                  >
+                    {localDbSyncLabel()}
+                  </span>
+                </Show>
+                <Show when={dbSyncState()?.status === "error" && dbSyncState()?.githubIssuesUrl}>
+                  <a
+                    href={dbSyncState().githubIssuesUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    class="text-xs text-[var(--soft)] underline decoration-[var(--line)] underline-offset-4 transition hover:text-[var(--fg)]"
+                  >
+                    Status
+                  </a>
+                </Show>
+              </div>
+            </Show>
+          </div>
           <span class="group relative inline-flex">
             <button
               type="button"
@@ -3543,7 +3558,7 @@ function App() {
         </div>
       </header>
 
-      <Show when={showSettings() && localMode()}>
+      <Show when={showSettings()}>
         <section class="border-b border-[var(--line)] bg-[var(--panel)] px-6 py-4">
           <div class="flex items-center justify-between gap-4">
             <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Settings</div>
@@ -3557,6 +3572,45 @@ function App() {
           </div>
           <div class="mt-4 space-y-4">
             <div class="border border-[var(--line)] p-4">
+              <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Appearance</div>
+              <div class="mt-3 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setThemePreferenceChoice("light")}
+                  class={`border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${
+                    themePreference() === "light"
+                      ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]"
+                      : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                  }`}
+                >
+                  Light
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setThemePreferenceChoice("dark")}
+                  class={`border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${
+                    themePreference() === "dark"
+                      ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]"
+                      : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                  }`}
+                >
+                  Dark
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setThemePreferenceChoice("system")}
+                  class={`border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${
+                    themePreference() === "system"
+                      ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]"
+                      : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                  }`}
+                >
+                  System (Auto)
+                </button>
+              </div>
+            </div>
+
+            <Show when={localMode()}>
               <div class="flex items-center justify-between gap-4">
                 <div>
                   <div class="text-sm font-semibold">Audio cache</div>
@@ -3608,7 +3662,7 @@ function App() {
               <div class="mt-3 text-xs text-[var(--muted)]">
                 Smart clear removes oldest cached songs to stay within the limit. Clear all removes every cached file.
               </div>
-            </div>
+            </Show>
           </div>
         </section>
       </Show>
