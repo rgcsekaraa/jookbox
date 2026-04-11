@@ -23,7 +23,7 @@ on:
         default: "main"
 permissions:
   contents: write
-  actions: read
+  actions: write
 
 concurrency:
   group: refresh-library
@@ -77,6 +77,14 @@ jobs:
 
       - name: Ensure data directories exist
         run: mkdir -p data exports packages/isaibox-local/app/data
+
+      - name: Back up current published DB
+        if: hashFiles('packages/isaibox-local/app/data/masstamilan.duckdb') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: duckdb-backup-${{ github.run_id }}
+          path: packages/isaibox-local/app/data/masstamilan.duckdb
+          retention-days: 30
 
       - name: Run scraper
         shell: bash
