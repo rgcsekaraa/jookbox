@@ -336,28 +336,7 @@ const SpotifyIcon = () => (
   </svg>
 );
 
-const ThemeIcon = (props) => (
-  <svg viewBox="0 0 24 24" class="h-[14px] w-[14px] fill-none stroke-current stroke-[1.8]">
-    <Show
-      when={props.theme === "dark"}
-      fallback={
-        <>
-          <path d="M12 3v2.5" />
-          <path d="M12 18.5V21" />
-          <path d="M4.9 4.9 6.7 6.7" />
-          <path d="m17.3 17.3 1.8 1.8" />
-          <path d="M3 12h2.5" />
-          <path d="M18.5 12H21" />
-          <path d="m4.9 19.1 1.8-1.8" />
-          <path d="m17.3 6.7 1.8-1.8" />
-          <circle cx="12" cy="12" r="4" />
-        </>
-      }
-    >
-      <path d="M20 14.5A7.5 7.5 0 1 1 9.5 4 6 6 0 0 0 20 14.5Z" />
-    </Show>
-  </svg>
-);
+
 
 const getInitials = (name, email = "") => {
   const parts = (name || "")
@@ -445,6 +424,7 @@ function App() {
   const [themePreference, setThemePreference] = createSignal("system");
   const [systemTheme, setSystemTheme] = createSignal("dark");
   const [mainTab, setMainTab] = createSignal("library");
+  const activeTheme = createMemo(() => (themePreference() === "system" ? systemTheme() : themePreference()));
   const [recentIds, setRecentIds] = createSignal([]);
   const [radioQueue, setRadioQueue] = createSignal([]);
   const [radioStations, setRadioStations] = createSignal([]);
@@ -818,7 +798,7 @@ function App() {
     const filteredByDirector = musicDirectorFilter()
       ? filteredByArtist.filter((song) => normalizeText(song.musicDirector) === normalizeText(musicDirectorFilter()))
       : filteredByArtist;
-    return filteredByDirector.slice(0, 200);
+    return (movieFilter() || artistFilter() || musicDirectorFilter()) ? filteredByDirector.slice(0, 2000) : filteredByDirector.slice(0, 200);
   });
   const visibleAlbums = createMemo(() => {
     if (musicDirectorFilter() || artistFilter()) {
@@ -827,11 +807,20 @@ function App() {
         const existing = grouped.get(song.movie);
         if (existing) {
           existing.count += 1;
+          if (song.year && (!existing.year || song.year > existing.year)) {
+            existing.year = song.year;
+          }
         } else {
           grouped.set(song.movie, { album: song.movie, musicDirector: song.musicDirector, year: song.year, count: 1 });
         }
       }
-      return Array.from(grouped.values()).sort((a, b) => b.count - a.count || a.album.localeCompare(b.album));
+      return Array.from(grouped.values()).sort((a, b) => {
+        if (musicDirectorFilter()) {
+          const yearDiff = (b.year || 0) - (a.year || 0);
+          if (yearDiff !== 0) return yearDiff;
+        }
+        return b.count - a.count || a.album.localeCompare(b.album);
+      });
     }
     return results().albums || [];
   });
@@ -3341,7 +3330,7 @@ function App() {
           </div>
         </div>
       </Show>
-      <header class="z-20 flex h-20 shrink-0 items-center border-b border-[var(--line)] bg-[var(--bg)] px-4 md:h-18 md:px-6">
+      <header class="flex min-w-0 flex-wrap items-center gap-3 border-b border-[var(--line)] px-6 py-4 sm:flex-nowrap sm:justify-between">
         <span class="group relative inline-flex shrink-0 items-center gap-3">
           <BrandIcon />
           <span class="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--brand)]">isaibox</span>
@@ -3367,116 +3356,173 @@ function App() {
             aria-hidden="true"
             class="pointer-events-none absolute left-[-9999px] top-0 opacity-0"
           />
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-4">
             <button
               type="button"
               onClick={() => setShowSettings(!showSettings())}
-              class={`rounded-full border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] transition ${
-                showSettings() ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)]"
+              class={`font-mono text-[10px] uppercase tracking-[0.22em] transition ${
+                showSettings() ? "text-[var(--fg)] underline underline-offset-4" : "text-[var(--soft)] hover:text-[var(--fg)]"
               }`}
             >
               Settings
             </button>
             <button
               type="button"
-              onClick={() => {
-                const choices = ["light", "dark", "system"];
-                const next = choices[(choices.indexOf(themePreference()) + 1) % choices.length];
-                void setThemePreferenceChoice(next);
-              }}
-              class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
-              title={`Theme: ${themePreference()}`}
+              onClick={() => setShowShortcutHelp(true)}
+              class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
             >
-              <ThemeIcon theme={activeTheme()} />
+              Shortcuts
             </button>
           </div>
 
           <Show when={localMode()}>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-3">
               <Show when={cacheNearFull() && !cacheFull()}>
-                <span class="rounded-full border border-yellow-500/40 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-yellow-500">
+                <span class="font-mono text-[10px] uppercase tracking-[0.18em] text-yellow-500">
                   Cache {cachePercent()}%
                 </span>
               </Show>
               <Show when={localDbSyncLabel()}>
                 <span
-                  class={`max-w-[220px] truncate rounded-full border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] ${localDbSyncTone()}`}
+                  class="max-w-[180px] truncate font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--soft)] opacity-60"
                   title={dbSyncState()?.message || localDbSyncLabel()}
                 >
                   {localDbSyncLabel()}
                 </span>
               </Show>
+              <Show when={dbSyncState()?.status === "error" && dbSyncState()?.githubIssuesUrl}>
+                <a
+                  href={dbSyncState().githubIssuesUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="text-xs text-[var(--soft)] underline decoration-[var(--line)] underline-offset-4 transition hover:text-[var(--fg)]"
+                >
+                  Raise issue
+                </a>
+              </Show>
             </div>
           </Show>
-
-          <span class="group relative inline-flex">
-            <button
-              type="button"
-              onClick={() => setShowShortcutHelp(true)}
-              aria-label="Show keyboard shortcuts"
-              class="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
-            >
-              <HelpIcon />
-            </button>
-            <TooltipBubble text="Keyboard shortcuts" position="top-full left-1/2 -translate-x-1/2 mt-2" />
-          </span>
-
           <Show when={authEnabled()}>
-            <div
-              class="relative"
-              onMouseEnter={() => setShowProfileMenu(true)}
-              onMouseLeave={() => setShowProfileMenu(false)}
-            >
-              <Show
-                when={user()}
-                fallback={
-                  <button
-                    type="button"
-                    ref={(el) => {
-                      profileMenuButtonRef = el;
-                    }}
-                    onClick={() => setShowProfileMenu((v) => !v)}
-                    class="flex h-9 items-center gap-2 rounded-full border border-[var(--line)] px-2.5 text-[var(--soft)] transition hover:border-[var(--fg)]"
-                  >
-                    <UserIcon />
-                    <span class="hidden text-sm md:block">Account</span>
-                    <ChevronDownIcon />
-                  </button>
-                }
+          <Show
+            when={user()}
+            fallback={
+              <div
+                class="relative"
+                onMouseEnter={() => setShowProfileMenu(true)}
+                onMouseLeave={() => setShowProfileMenu(false)}
               >
-                {(account) => (
+                <button
+                  type="button"
+                  ref={(el) => {
+                    profileMenuButtonRef = el;
+                  }}
+                  onClick={() => setShowProfileMenu((value) => !value)}
+                  aria-label="Open account menu"
+                  class={`flex h-9 items-center gap-2 rounded-full border px-4 text-[var(--soft)] transition ${
+                    showProfileMenu() ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]" : "border-[var(--line)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                  }`}
+                >
+                  <span class="text-sm">Account</span>
+                  <ChevronDownIcon />
+                </button>
+                <Show when={showProfileMenu()}>
+                  <div
+                    ref={(el) => {
+                      profileMenuRef = el;
+                    }}
+                    class="absolute right-0 top-full z-30 mt-3 w-[250px] border border-[var(--line)] bg-[var(--bg)] p-3 shadow-lg"
+                  >
+                    <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Login</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowProfileMenu(false);
+                        beginGoogleLogin();
+                      }}
+                      class="mt-3 flex w-full items-center justify-between border border-[var(--line)] px-3 py-2 text-left transition hover:border-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={!googleReady()}
+                    >
+                      <span class="text-sm text-[var(--fg)]">Sign in with Google</span>
+                      <UserIcon />
+                    </button>
+                    <div class="mt-4 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Theme</div>
+                    <div class="mt-2 grid grid-cols-3 gap-2">
+                      <button type="button" onClick={() => setThemePreferenceChoice("light")} class={`border px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${themePreference() === "light" ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>Light</button>
+                      <button type="button" onClick={() => setThemePreferenceChoice("system")} class={`border px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${themePreference() === "system" ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>System</button>
+                      <button type="button" onClick={() => setThemePreferenceChoice("dark")} class={`border px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${themePreference() === "dark" ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>Dark</button>
+                    </div>
+                  </div>
+                </Show>
+              </div>
+            }
+          >
+            {(account) => (
+              <div class="flex min-w-0 items-center gap-2 md:gap-3">
+                <Show when={account().is_admin}>
+                  <span class="rounded-full border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+                    Admin
+                  </span>
+                </Show>
+                <div
+                  class="relative"
+                  onMouseEnter={() => setShowProfileMenu(true)}
+                  onMouseLeave={() => setShowProfileMenu(false)}
+                >
                   <button
                     type="button"
                     ref={(el) => {
                       profileMenuButtonRef = el;
                     }}
-                    onClick={() => setShowProfileMenu((v) => !v)}
-                    class="flex h-9 items-center gap-2 rounded-full border border-[var(--line)] px-2.5 text-[var(--soft)] transition hover:border-[var(--fg)]"
+                    onClick={() => setShowProfileMenu((value) => !value)}
+                    aria-label="Open profile menu"
+                    class={`flex h-9 items-center gap-2 rounded-full border px-2.5 text-[var(--soft)] transition ${
+                      showProfileMenu() ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]" : "border-[var(--line)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                    }`}
                   >
                     <span class="flex h-7 w-7 items-center justify-center rounded-full border border-current font-mono text-[11px] uppercase tracking-[0.16em]">
                       {getInitials(account().name, account().email)}
                     </span>
-                    <span class="hidden max-w-[120px] truncate text-sm md:block">{account().name || account().email}</span>
+                    <span class="hidden max-w-[120px] truncate text-sm md:block lg:max-w-[160px]">{account().name || account().email}</span>
                     <ChevronDownIcon />
                   </button>
-                )}
-              </Show>
-              <Show when={showProfileMenu()}>
-                <div
-                  ref={(el) => {
-                    profileMenuRef = el;
-                  }}
-                  class="absolute right-0 top-full z-30 mt-3 w-[250px] border border-[var(--line)] bg-[var(--bg)] p-3 shadow-lg"
-                >
-                  {/* Account Menu content would go here, simplified for now to ensure no bugs */}
-                  <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Account</div>
-                  <button onClick={() => void logout()} class="mt-3 flex w-full items-center justify-between border border-[var(--line)] px-3 py-2 text-left transition hover:border-[var(--fg)]">
-                    <span class="text-sm">Logout</span>
-                    <LogoutIcon />
-                  </button>
+                  <Show when={showProfileMenu()}>
+                    <div
+                      ref={(el) => {
+                        profileMenuRef = el;
+                      }}
+                      class="absolute right-0 top-full z-30 mt-3 w-[250px] border border-[var(--line)] bg-[var(--bg)] p-3 shadow-lg"
+                    >
+                      <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Profile settings</div>
+                      <div class="mt-3">
+                        <div class="truncate text-sm text-[var(--fg)]">{account().name || "Account"}</div>
+                        <div class="mt-1 truncate font-mono text-[10px] text-[var(--soft)]">{account().email}</div>
+                      </div>
+                      <div class="mt-4 space-y-2">
+                        <div>
+                          <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Theme</div>
+                          <div class="mt-2 grid grid-cols-3 gap-2">
+                            <button type="button" onClick={() => setThemePreferenceChoice("light")} class={`border px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${themePreference() === "light" ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>Light</button>
+                            <button type="button" onClick={() => setThemePreferenceChoice("system")} class={`border px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${themePreference() === "system" ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>System</button>
+                            <button type="button" onClick={() => setThemePreferenceChoice("dark")} class={`border px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${themePreference() === "dark" ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>Dark</button>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowProfileMenu(false);
+                            void logout();
+                          }}
+                          class="flex w-full items-center justify-between border border-[var(--line)] px-3 py-2 text-left transition hover:border-[var(--fg)]"
+                        >
+                          <span class="text-sm text-[var(--fg)]">Logout</span>
+                        </button>
+                      </div>
+                    </div>
+                  </Show>
                 </div>
-              </Show>
-            </div>
+              </div>
+            )}
+          </Show>
           </Show>
         </div>
       </header>
@@ -3503,7 +3549,7 @@ function App() {
                   class={`border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${
                     themePreference() === "light"
                       ? "border-[var(--fg)] bg-[var(--hover)] text-[var(--fg)]"
-                      : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                      : "border-[var(--line)] text-[var(--soft)] hover:border(--fg)] hover:text-[var(--fg)]"
                   }`}
                 >
                   Light
@@ -3534,56 +3580,44 @@ function App() {
             </div>
 
             <Show when={localMode()}>
-              <div class="flex items-center justify-between gap-4">
-                <div>
-                  <div class="text-sm font-semibold">Audio cache</div>
-                  <div class="mt-1 text-sm text-[var(--soft)]">
-                    <Show when={cacheStatus()} fallback="Loading cache info...">
-                      {(() => {
-                        const usageMb = () => ((cacheStatus()?.usageBytes || 0) / (1024 * 1024)).toFixed(0);
-                        const usageGb = () => ((cacheStatus()?.usageBytes || 0) / (1024 * 1024 * 1024)).toFixed(2);
-                        const limitGb = () => cacheStatus()?.limitGb || 0;
-                        return (
-                          <span>
-                            {Number(usageMb()) > 1024 ? `${usageGb()} GB` : `${usageMb()} MB`} used of {limitGb()} GB limit ({cachePercent()}%)
-                          </span>
-                        );
-                      })()}
-                    </Show>
-                  </div>
-                  <Show when={cacheStatus()}>
-                    <div class="mt-2 h-2 w-full max-w-[300px] overflow-hidden rounded-full bg-[var(--line)]">
-                      <div
-                        class={`h-full rounded-full transition-all ${cacheFull() ? "bg-red-500" : cacheNearFull() ? "bg-yellow-500" : "bg-green-500"}`}
-                        style={`width: ${cachePercent()}%`}
-                      />
+              <div class="border border-[var(--line)] p-4">
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-sm font-semibold">Audio cache</div>
+                    <div class="mt-1 text-sm text-[var(--soft)]">
+                      <Show when={cacheStatus()} fallback="Loading cache info...">
+                        {(() => {
+                          const usageMb = () => ((cacheStatus()?.usageBytes || 0) / (1024 * 1024)).toFixed(0);
+                          const usageGb = () => ((cacheStatus()?.usageBytes || 0) / (1024 * 1024 * 1024)).toFixed(2);
+                          const limitGb = () => cacheStatus()?.limitGb || 0;
+                          return (
+                            <span>
+                              {Number(usageMb()) > 1024 ? `${usageGb()} GB` : `${usageMb()} MB`} used of {limitGb()} GB limit ({cachePercent()}%)
+                            </span>
+                          );
+                        })()}
+                      </Show>
                     </div>
-                  </Show>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void trimCache(false)}
+                      disabled={cacheTrimming()}
+                      class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)] disabled:opacity-50"
+                    >
+                      {cacheTrimming() ? "Clearing..." : "Smart clear"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void trimCache(true)}
+                      disabled={cacheTrimming()}
+                      class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)] disabled:opacity-50"
+                    >
+                      {cacheTrimming() ? "Clearing..." : "Clear all"}
+                    </button>
+                  </div>
                 </div>
-                <div class="flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => void trimCache(false)}
-                    disabled={cacheTrimming()}
-                    class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)] disabled:opacity-50"
-                  >
-                    {cacheTrimming() ? "Clearing..." : "Smart clear"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void trimCache(true)}
-                    disabled={cacheTrimming()}
-                    class="border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)] disabled:opacity-50"
-                  >
-                    {cacheTrimming() ? "Clearing..." : "Clear all"}
-                  </button>
-                </div>
-              </div>
-              <Show when={cacheMessage()}>
-                <div class="mt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">{cacheMessage()}</div>
-              </Show>
-              <div class="mt-3 text-xs text-[var(--muted)]">
-                Smart clear removes oldest cached songs to stay within the limit. Clear all removes every cached file.
               </div>
             </Show>
           </div>
@@ -4510,141 +4544,9 @@ function App() {
               </aside>
 
               <div class="flex min-h-0 flex-col overflow-hidden border border-[var(--line)] bg-[var(--panel)]">
-                <Show when={playlistDetailLoading() && !showPlaylistDetail()}>
-                  <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-                    <div>
-                      <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
-                      <div class="mt-3 text-sm text-[var(--soft)]">Loading{loadingDots()}</div>
-                    </div>
-                  </div>
-                </Show>
-                <Show when={!playlistDetailLoading() && playlistDetailError() && !showPlaylistDetail()}>
-                  <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-                    <div>
-                      <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
-                      <div class="mt-3 text-sm text-[var(--soft)]">{playlistDetailError()}</div>
-                    </div>
-                  </div>
-                </Show>
-                <Show when={visiblePlaylistDetail()}>
-                  {(playlist) => (
-                    <>
-                      <section class="border-b border-[var(--line-soft)] px-4 py-4">
-                        <div class="flex items-center justify-between gap-4">
-                          <div class="min-w-0">
-                            <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlist</div>
-                            <div class="mt-2 text-lg font-semibold">{playlist().name}</div>
-                            <div class="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">
-                              {playlist().source || "manual"} · {(playlist().tracks || []).length} tracks
-                            </div>
-                          </div>
-                          <Show when={canManageVisiblePlaylist()}>
-                            <div class="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--soft)]">
-                              <button
-                                type="button"
-                                onClick={() => void clearVisiblePlaylist()}
-                                disabled={playlistMutationBusy() === `clear:${playlist().id}`}
-                                class={`transition ${
-                                  playlistMutationBusy() === `clear:${playlist().id}` ? "cursor-not-allowed text-[var(--line)]" : "hover:text-[var(--fg)]"
-                                }`}
-                              >
-                                Clear
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void deleteVisiblePlaylist()}
-                                disabled={playlistMutationBusy() === `delete:${playlist().id}`}
-                                class={`transition ${
-                                  playlistMutationBusy() === `delete:${playlist().id}` ? "cursor-not-allowed text-[var(--line)]" : "hover:text-[var(--fg)]"
-                                }`}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </Show>
-                        </div>
-                      </section>
-                      <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-4 py-2">
-                        <SortableSongHeader columnKey="default" label="#" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-8 text-right" />
-                        <SortableSongHeader columnKey="track" label="Song Name" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="min-w-0 flex-[1.4]" />
-                        <SortableSongHeader columnKey="movie" label="Movie" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 md:block" />
-                        <SortableSongHeader columnKey="musicDirector" label="Music Director" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 lg:block" />
-                        <SortableSongHeader columnKey="singers" label="Singer" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 xl:block" />
-                        <SortableSongHeader columnKey="year" label="Year" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-20" />
-                        <Show when={canManageVisiblePlaylist()}>
-                          <span class="w-16 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Remove</span>
-                        </Show>
-                      </div>
-                      <Show
-                        when={(playlist().tracks || []).length > 0}
-                        fallback={
-                          <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-                            <div class="text-sm text-[var(--soft)]">No songs in this playlist yet.</div>
-                          </div>
-                        }
-                      >
-                        <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-                          <For each={sortedActiveSongList()}>
-                            {(track, index) => {
-                              const active = () => selectedSong()?.id === track.id;
-                              return (
-                              <li>
-                                <button
-                                  ref={(el) => {
-                                    if (el) {
-                                      rowRefs.set(track.id, el);
-                                    } else {
-                                      rowRefs.delete(track.id);
-                                    }
-                                  }}
-                                  type="button"
-                                  onClick={() => loadSong(track, true)}
-                                  class={`flex w-full items-center gap-4 px-4 py-3 text-left transition ${
-                                    active()
-                                      ? currentTrackId() === track.id
-                                        ? "song-row-active text-[var(--fg)]"
-                                        : "bg-[var(--hover)] text-[var(--fg)]"
-                                      : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
-                                  }`}
-                                >
-                                  <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
-                                    {currentTrackId() === track.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
-                                  </span>
-                                  <span class="min-w-0 flex-[1.4] truncate text-sm">{track.track}</span>
-                                  <DrilldownText value={track.movie} onClick={navigateToMovie} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] md:block" />
-                                  <DrilldownText value={track.musicDirector} onClick={navigateToMusicDirector} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] lg:block" />
-                                  <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] xl:block">{track.singers || "-"}</span>
-                                  <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{track.year || "-"}</span>
-                                  <Show when={canManageVisiblePlaylist()}>
-                                    <span class="flex w-16 justify-end">
-                                      <span
-                                        role="button"
-                                        tabindex="-1"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          void removeSongFromPlaylist(playlist().id, track.id);
-                                        }}
-                                        class="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)] transition hover:text-[var(--fg)]"
-                                      >
-                                        Remove
-                                      </span>
-                                    </span>
-                                  </Show>
-                                </button>
-                              </li>
-                              );
-                            }}
-                          </For>
-                        </ul>
-                      </Show>
-                    </>
-                  )}
-                </Show>
-                <Show when={!playlistDetailLoading() && (!showPlaylistDetail() || query().trim() || movieFilter() || artistFilter() || musicDirectorFilter() || libraryNavStack().length > 0) && !playlistDetailError()}>
-
-                <Show when={query().trim() || movieFilter() || artistFilter() || musicDirectorFilter() || libraryNavStack().length > 0}>
-                  <section class="border-b border-[var(--line-soft)] px-4 py-4">
-                    <div class="flex items-center gap-4">
+                <Show when={!playlistDetailLoading() && !playlistDetailError()}>
+                  <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <header class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-4">
                       <Show when={libraryNavStack().length > 0}>
                         <button
                           type="button"
@@ -4655,21 +4557,61 @@ function App() {
                         </button>
                       </Show>
                       <div class="min-w-0 flex-1">
-                        <Show when={movieFilter()}>
-                          <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Movie</div>
-                          <div class="mt-1 truncate text-sm text-[var(--fg)]">{movieFilter()}</div>
+                        <Show when={visiblePlaylistDetail()}>
+                          {(playlist) => (
+                            <>
+                              <div class="truncate text-sm font-semibold">{playlist().name}</div>
+                              <div class="mt-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">
+                                playlist · {(playlist().tracks || []).length} items
+                              </div>
+                            </>
+                          )}
                         </Show>
-                        <Show when={!movieFilter() && musicDirectorFilter()}>
-                          <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Music director</div>
-                          <div class="mt-1 truncate text-sm text-[var(--fg)]">{musicDirectorFilter()}</div>
+                        <Show when={!visiblePlaylistDetail() && (movieFilter() || artistFilter() || musicDirectorFilter())}>
+                          <>
+                            <Show when={movieFilter()}>
+                              <div class="truncate text-sm font-semibold">{movieFilter()}</div>
+                            </Show>
+                            <Show when={!movieFilter() && musicDirectorFilter()}>
+                              <div class="truncate text-sm font-semibold">{musicDirectorFilter()}</div>
+                            </Show>
+                            <Show when={!movieFilter() && !musicDirectorFilter() && artistFilter()}>
+                              <div class="truncate text-sm font-semibold">{artistFilter()}</div>
+                            </Show>
+                            <div class="mt-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">
+                              {musicDirectorFilter() && !movieFilter() ? "movies" : "songs"} · {musicDirectorFilter() && !movieFilter() ? visibleAlbums().length : visibleResults().length} results
+                            </div>
+                          </>
                         </Show>
-                        <Show when={!movieFilter() && !musicDirectorFilter() && artistFilter()}>
-                          <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Singer</div>
-                          <div class="mt-1 truncate text-sm text-[var(--fg)]">{artistFilter()}</div>
+                        <Show when={!visiblePlaylistDetail() && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
+                          <div class="truncate text-sm font-semibold uppercase tracking-widest text-[var(--faint)]">Library</div>
                         </Show>
                       </div>
-                      <div class="flex shrink-0 items-center gap-3">
-                        <Show when={movieFilter() || artistFilter() || musicDirectorFilter()}>
+
+                      <div class="flex shrink-0 items-center gap-4">
+                        <Show when={visiblePlaylistDetail() && canManageVisiblePlaylist()}>
+                          {(p) => (
+                            <div class="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+                              <button
+                                type="button"
+                                onClick={() => void clearVisiblePlaylist()}
+                                disabled={playlistMutationBusy() === `clear:${p().id}`}
+                                class="hover:text-[var(--fg)] disabled:text-[var(--line)]"
+                              >
+                                Clear
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void deleteVisiblePlaylist()}
+                                disabled={playlistMutationBusy() === `delete:${p().id}`}
+                                class="hover:text-[var(--fg)] disabled:text-[var(--line)]"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </Show>
+                        <Show when={!visiblePlaylistDetail() && (movieFilter() || artistFilter() || musicDirectorFilter())}>
                           <button
                             type="button"
                             onClick={() => {
@@ -4677,123 +4619,117 @@ function App() {
                               setArtistFilter("");
                               setMusicDirectorFilter("");
                             }}
-                            class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--soft)] transition hover:text-[var(--fg)]"
+                            class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] transition hover:text-[var(--fg)]"
                           >
-                            Clear
+                            Clear filters
                           </button>
                         </Show>
                       </div>
-                    </div>
+                    </header>
 
-                    <div class="mt-3 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
-                      <span>{musicDirectorFilter() && !movieFilter() ? "movies" : "songs"}</span>
-                      <span>
-                        {musicDirectorFilter() && !movieFilter()
-                          ? visibleAlbums().length.toLocaleString()
-                          : visibleResults().length.toLocaleString()} shown
-                      </span>
-                    </div>
-                  </section>
-                </Show>
-
-                <Show when={!showPlaylistDetail() && (!musicDirectorFilter() || movieFilter())}>
-                  <>
-                    <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-4 py-2">
-                      <SortableSongHeader columnKey="default" label="#" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-8 text-right" />
-                      <SortableSongHeader columnKey="track" label="Song Name" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="min-w-0 flex-[1.4]" />
-                      <SortableSongHeader columnKey="movie" label="Movie" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 md:block" />
-                      <SortableSongHeader columnKey="musicDirector" label="Music Director" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 lg:block" />
-                      <SortableSongHeader columnKey="singers" label="Singer" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 xl:block" />
-                      <SortableSongHeader columnKey="year" label="Year" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-20" />
-                      <Show when={user()}>
-                        <span class="w-8 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Fav</span>
-                      </Show>
-                    </div>
-                    <Show when={!loading()} fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">Loading{loadingDots()}</div>}>
-                      <Show when={!error()} fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--soft)]">{error()}</div>}>
-                        <Show
-                          when={sortedActiveSongList().length > 0}
-                          fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">No results</div>}
-                        >
-                          <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto">
-                            <For each={sortedActiveSongList()}>
-                              {(song, index) => {
-                                const active = () => selectedSong()?.id === song.id;
-                                return (
-                                  <li>
-                                    <button
-                                      ref={(el) => {
-                                        if (el) {
-                                          rowRefs.set(song.id, el);
-                                        } else {
-                                          rowRefs.delete(song.id);
-                                        }
-                                      }}
-                                      type="button"
-                                      onClick={() => loadSong(song, true)}
-                                      class={`flex w-full items-center gap-4 px-4 py-3 text-left transition ${
-                                        active()
-                                          ? currentTrackId() === song.id
-                                            ? "song-row-active text-[var(--fg)]"
-                                            : "bg-[var(--hover)] text-[var(--fg)]"
-                                          : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
-                                      }`}
-                                    >
-                                      <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
-                                        {currentTrackId() === song.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
-                                      </span>
-                                      <span class="min-w-0 flex-[1.4] truncate text-sm">{song.track}</span>
-                                      <DrilldownText value={song.movie} onClick={navigateToMovie} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] md:block" />
-                                      <DrilldownText value={song.musicDirector} onClick={navigateToMusicDirector} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] lg:block" />
-                                      <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] xl:block">{song.singers || "-"}</span>
-                                      <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{song.year || "-"}</span>
-                                      <Show when={user()}>
-                                        <span class="flex w-8 justify-end">
-                                          <span
-                                            role="button"
-                                            tabindex="-1"
-                                            onClick={(event) => {
-                                              event.stopPropagation();
-                                              void toggleFavorite(song.id);
+                    <Show
+                      when={searchTab() === "albums" || (musicDirectorFilter() && !movieFilter())}
+                      fallback={
+                        <>
+                          <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2">
+                            <SortableSongHeader columnKey="default" label="#" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-8 text-right" />
+                            <SortableSongHeader columnKey="track" label="Song Name" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="min-w-0 flex-[1.4]" />
+                            <SortableSongHeader columnKey="movie" label="Movie" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 md:block" />
+                            <SortableSongHeader columnKey="musicDirector" label="Music Director" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 lg:block" />
+                            <SortableSongHeader columnKey="singers" label="Singer" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 xl:block" />
+                            <SortableSongHeader columnKey="year" label="Year" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-20" />
+                            <Show when={user()}>
+                              <span class="w-8 text-right font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Fav</span>
+                            </Show>
+                          </div>
+                          <Show when={!loading()} fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">Loading{loadingDots()}</div>}>
+                            <Show when={!error()} fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--soft)]">{error()}</div>}>
+                              <Show
+                                when={sortedActiveSongList().length > 0}
+                                fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">No results</div>}
+                              >
+                                <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto px-2">
+                                  <For each={sortedActiveSongList()}>
+                                    {(song, index) => {
+                                      const active = () => selectedSong()?.id === song.id;
+                                      return (
+                                        <li>
+                                          <button
+                                            ref={(el) => {
+                                              if (el) rowRefs.set(song.id, el);
+                                              else rowRefs.delete(song.id);
                                             }}
-                                            class={`transition-colors ${favoriteIdSet().has(song.id) ? "text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"}`}
+                                            type="button"
+                                            onClick={() => loadSong(song, true)}
+                                            class={`flex w-full items-center gap-4 px-4 py-3 text-left transition ${
+                                              active()
+                                                ? currentTrackId() === song.id
+                                                  ? "song-row-active text-[var(--fg)]"
+                                                  : "bg-[var(--hover)] text-[var(--fg)]"
+                                                : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
+                                            }`}
                                           >
-                                            <HeartIcon filled={favoriteIdSet().has(song.id)} />
-                                          </span>
-                                        </span>
-                                      </Show>
-                                    </button>
-                                  </li>
-                                );
-                              }}
-                            </For>
-                          </ul>
-                        </Show>
-                      </Show>
+                                            <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
+                                              {currentTrackId() === song.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
+                                            </span>
+                                            <span class="min-w-0 flex-[1.4] truncate text-sm">{song.track}</span>
+                                            <DrilldownText value={song.movie} onClick={navigateToMovie} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] md:block" />
+                                            <DrilldownText value={song.musicDirector} onClick={navigateToMusicDirector} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] lg:block" />
+                                            <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] xl:block">{song.singers || "-"}</span>
+                                            <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{song.year || "-"}</span>
+                                            <Show when={user()}>
+                                              <span class="flex w-8 justify-end">
+                                                <span
+                                                  role="button"
+                                                  tabindex="-1"
+                                                  onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    void toggleFavorite(song.id);
+                                                  }}
+                                                  class={`transition-colors ${favoriteIdSet().has(song.id) ? "text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"}`}
+                                                >
+                                                  <HeartIcon filled={favoriteIdSet().has(song.id)} />
+                                                </span>
+                                              </span>
+                                            </Show>
+                                          </button>
+                                        </li>
+                                      );
+                                    }}
+                                  </For>
+                                </ul>
+                              </Show>
+                            </Show>
+                          </Show>
+                        </>
+                      }
+                    >
+                      <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
+                        <span class="min-w-0 flex-1">Movie / Album Name</span>
+                        <span class="w-20">Year</span>
+                        <span class="w-24 text-right">Tracks</span>
+                      </div>
+                      <ul class="min-h-0 flex-1 overflow-y-auto px-2">
+                        <For each={visibleAlbums()}>
+                          {(album) => (
+                            <li>
+                              <button
+                                type="button"
+                                onClick={() => navigateToMovie(album.album)}
+                                class="flex w-full items-center gap-4 border-b border-[var(--line-soft)] px-4 py-3 text-left transition hover:bg-[var(--hover)]"
+                              >
+                                <span class="min-w-0 flex-1 truncate text-sm">{album.album}</span>
+                                <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{album.year || "-"}</span>
+                                <span class="w-24 text-right font-mono text-[11px] text-[var(--soft)]">
+                                  {album.count ? `${album.count} songs` : ""}
+                                </span>
+                              </button>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
                     </Show>
-                  </>
-                </Show>
-
-                <Show when={musicDirectorFilter() && !movieFilter()}>
-                  <div class="flex flex-1 items-start overflow-y-auto p-4">
-                    <div class="flex flex-wrap gap-2">
-                      <For each={visibleAlbums()}>
-                        {(album) => (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigateToMovie(album.album);
-                            }}
-                            class="border border-[var(--line)] px-3 py-2 text-left transition hover:border-[var(--fg)]"
-                          >
-                            <div class="text-sm">{album.album}</div>
-                            <div class="font-mono text-[10px] text-[var(--soft)]">{album.count} songs · {album.year}</div>
-                          </button>
-                        )}
-                      </For>
-                    </div>
                   </div>
-                </Show>
                 </Show>
               </div>
             </div>
