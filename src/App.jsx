@@ -433,6 +433,7 @@ function App() {
   const [isPlaying, setIsPlaying] = createSignal(false);
   const [currentTime, setCurrentTime] = createSignal(0);
   const [duration, setDuration] = createSignal(0);
+  const [showRemainingTime, setShowRemainingTime] = createSignal(false);
   const [volume, setVolume] = createSignal(0.9);
   const [muted, setMuted] = createSignal(false);
   const [playbackSpeed, setPlaybackSpeed] = createSignal(1);
@@ -4943,7 +4944,13 @@ function App() {
             disabled={radioPlaybackLocked()}
             style={{ "accent-color": "var(--fg)" }}
           />
-          <span class="w-10 font-mono text-[10px] text-[var(--muted)]">{formatTime(duration())}</span>
+          <button
+            type="button"
+            onClick={() => setShowRemainingTime((prev) => !prev)}
+            class="min-w-[2.5rem] text-left font-mono text-[10px] text-[var(--muted)] transition hover:text-[var(--fg)]"
+          >
+            {showRemainingTime() ? `-${formatTime(Math.max(0, duration() - currentTime()))}` : formatTime(duration())}
+          </button>
         </div>
 
         <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
