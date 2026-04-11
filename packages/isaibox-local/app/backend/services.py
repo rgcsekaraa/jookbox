@@ -1149,16 +1149,17 @@ def reorder_playlist_songs_for_user(user: dict, playlist_id: str, song_ids: list
         if not playlist or (playlist[1] and not user["is_admin"]) or (not playlist[1] and playlist[2] != user["user_id"]):
             raise LookupError("Playlist not found")
         existing_rows = conn.execute(
-            "SELECT song_id FROM playlist_songs WHERE playlist_id = ? ORDER BY position, added_at",
+            "SELECT song_id, added_at FROM playlist_songs WHERE playlist_id = ? ORDER BY position, added_at",
             [playlist_id],
         ).fetchall()
-        existing_song_ids = [row[0] for row in existing_rows]
-        if set(cleaned_song_ids) != set(existing_song_ids) or len(cleaned_song_ids) != len(existing_song_ids):
+        song_metadata = {row[0]: row[1] for row in existing_rows}
+        cleaned_song_ids = [song_id for song_id in song_ids if isinstance(song_id, str) and song_id]
+        if set(cleaned_song_ids) != set(song_metadata.keys()) or len(cleaned_song_ids) != len(song_metadata):
             raise ValueError("Reorder list must contain the same playlist songs")
         conn.execute("DELETE FROM playlist_songs WHERE playlist_id = ?", [playlist_id])
         conn.executemany(
             "INSERT INTO playlist_songs (playlist_id, song_id, position, added_at) VALUES (?, ?, ?, ?)",
-            [[playlist_id, song_id, index + 1, now_utc()] for index, song_id in enumerate(cleaned_song_ids)],
+            [[playlist_id, song_id, index + 1, song_metadata.get(song_id, now_utc())] for index, song_id in enumerate(cleaned_song_ids)],
         )
         conn.execute("UPDATE playlists SET updated_at = ? WHERE playlist_id = ?", [now_utc(), playlist_id])
     return {"ok": True}
@@ -1450,7 +1451,7 @@ def replace_live_duckdb(download_path: Path, manifest: dict) -> dict:
             backup_path.unlink()
         if db_path.exists():
             merge_preserved_user_state(db_path, download_path)
-            os.replace(db_path, backup_path)
+            # Atomic replacement on Linux; handles existing open file handles gracefully
         os.replace(download_path, db_path)
         manifest_tmp_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
         os.replace(manifest_tmp_path, LOCAL_DB_MANIFEST_PATH)
@@ -2979,16 +2980,7 @@ def download_song_to_cache(song_id: str, url: str | None = None) -> None:
                 )
                 upstream.close()
             return
-        if not is_playable_upstream_response(upstream):
-            if upstream is not None:
-                app.logger.warning(
-                    "Refusing to cache non-audio upstream response for %s: status=%s content_type=%s",
-                    song_id,
-                    upstream.status_code,
-                    upstream.headers.get("Content-Type"),
-                )
-                upstream.close()
-            return
+
         try:
             with temp_path.open("wb") as output:
                 for chunk in upstream.iter_content(chunk_size=128 * 1024):

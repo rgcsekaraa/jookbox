@@ -246,7 +246,7 @@ def stream_song(song_id: str):
     passthrough_headers.setdefault("Accept-Ranges", "bytes")
     passthrough_headers["Cache-Control"] = "public, max-age=3600"
 
-    should_cache = (not LOCAL_MODE) and (not request.headers.get("Range") or request.headers.get("Range") == "bytes=0-")
+    should_cache = not request.headers.get("Range") or request.headers.get("Range") == "bytes=0-"
     temp_path = cached_path.with_suffix(".part")
 
     def generate():
@@ -622,13 +622,13 @@ def remove_song_from_playlist(playlist_id: str, song_id: str):
             return json_response({"ok": False, "message": "Playlist not found"}), 404
         conn.execute("DELETE FROM playlist_songs WHERE playlist_id = ? AND song_id = ?", [playlist_id, song_id])
         rows = conn.execute(
-            "SELECT song_id FROM playlist_songs WHERE playlist_id = ? ORDER BY position, added_at",
+            "SELECT song_id, added_at FROM playlist_songs WHERE playlist_id = ? ORDER BY position, added_at",
             [playlist_id],
         ).fetchall()
         conn.execute("DELETE FROM playlist_songs WHERE playlist_id = ?", [playlist_id])
         conn.executemany(
             "INSERT INTO playlist_songs (playlist_id, song_id, position, added_at) VALUES (?, ?, ?, ?)",
-            [[playlist_id, row[0], index + 1, now_utc()] for index, row in enumerate(rows)],
+            [[playlist_id, row[0], index + 1, row[1]] for index, row in enumerate(rows)],
         )
         conn.execute("UPDATE playlists SET updated_at = ? WHERE playlist_id = ?", [now_utc(), playlist_id])
     return json_response({"ok": True})

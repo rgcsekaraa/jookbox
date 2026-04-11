@@ -5111,6 +5111,20 @@ function App() {
                   setIsPlaying(false);
                 }
               }}
+              onError={(event) => {
+                if (event.currentTarget !== getActiveAudio() || event.currentTarget.dataset.songId !== currentTrackId()) {
+                  return;
+                }
+                setIsPlaying(false);
+                setStreamStarted(false);
+                if (autoplayNext()) {
+                  setTimeout(() => {
+                    if (currentTrackId() === event.currentTarget.dataset.songId) {
+                      selectRelative(1, true, currentTrackId() || selectedId(), { allowCrossfade: true });
+                    }
+                  }, 1500);
+                }
+              }}
             />
           )}
         </For>
