@@ -1,7 +1,7 @@
-# isaibox — Airflow + DuckDB
+# isaibox — DuckDB + Actions
 
 Daily incremental scraper and streaming app backend.  
-Stores everything in a single **DuckDB** file. Scheduled via **Apache Airflow**.
+Stores everything in a single **DuckDB** file. Scheduled and published via **GitHub Actions**.
 
 ---
 
@@ -9,27 +9,25 @@ Stores everything in a single **DuckDB** file. Scheduled via **Apache Airflow**.
 
 ```
 isaibox/
-├── setup.sh              ← run once to install everything
-├── start.sh              ← start Airflow (webserver + scheduler)
-├── stop.sh               ← stop Airflow
-├── trigger_full.sh       ← force a full re-scrape right now
-├── requirements.txt
-│
 ├── db.py                 ← DuckDB schema + read/write helpers
-├── scraper_core.py       ← HTTP fetch + HTML parsing (no Airflow dep)
+├── scraper_core.py       ← HTTP fetch + HTML parsing
 ├── query.py              ← CLI query tool
+├── run_standalone.py     ← Scraper execution script
 │
-├── dags/
-│   └── <scraper_dag>.py  ← Airflow DAG
+├── scripts/
+│   └── publish_library.py ← Safe DuckDB publishing and merge logic
+│
+├── .github/workflows/
+│   └── refresh-library.yml ← Automated library refresh workflow
 │
 ├── data/
-│   └── <library>.duckdb  ← single DuckDB file (created on first run)
+│   └── <library>.duckdb  ← single DuckDB file (downloaded or created)
 │
 ├── exports/
 │   ├── songs_YYYYMMDD.parquet   ← daily Parquet snapshot
 │   └── songs_latest.csv         ← latest CSV
 │
-└── airflow_home/         ← Airflow metadata (created by setup.sh)
+└── app.py                ← FastAPI backend
 ```
 
 ---
@@ -37,15 +35,13 @@ isaibox/
 ## Setup (one time)
 
 ```bash
-# 1. Clone / copy this folder, then:
-bash setup.sh
-```
+# 1. Clone / copy this folder, then create a virtual environment:
+python3 -m venv venv
+source venv/bin/activate
 
-This will:
-- Create a Python virtualenv
-- Install Airflow 2.9.3 + DuckDB + scraper deps
-- Configure Airflow (no Docker needed, runs locally)
-- Create an admin user (admin / admin)
+# 2. Install core dependencies:
+pip install duckdb requests beautifulsoup4 lxml tenacity fastapi uvicorn
+```
 
 ## isaibox auth setup
 
@@ -103,6 +99,18 @@ GEMINI_MODEL=gemini-2.5-flash
 Radio stations and AI playlists are generated only from songs already stored in DuckDB.
 The radio UI keeps the station loop internal and does not render the station queue as a visible list.
 
+## Run local app (Docker)
+
+If you just want to run the local playback application without installing Python or any dependencies, you can use the pre-configured local Docker package:
+
+```bash
+cd packages/isaibox-local
+docker compose up -d --build
+```
+
+The application will be available at **http://127.0.0.1:6789/**. This runs a trimmed-down version focused purely on playback and local packaged database syncing (disabling the admin UI, scraping logic, and Google auth).
+For more info or one-click run scripts, check the [packages/isaibox-local/README.md](packages/isaibox-local/README.md).
+
 ## Cache strategy
 
 `isaibox` now supports layered backend cache:
@@ -145,39 +153,16 @@ Pieces added for this flow:
 
 Workflow behavior:
 - runs automatically every 12 hours
-- can still be started manually with `workflow_dispatch`
-- runs the scraper, republishes `packages/isaibox-local/app/data/masstamilan.duckdb`, and rewrites `packages/isaibox-local/app/data/library-manifest.json`
-- commits only when the packaged database or manifest actually changed
+- can still be started manually with `workflow_dispatch` (optional full scan override)
+- runs the standalone scraper (`run_standalone.py`)
+- safely merges new data into the existing published DuckDB via `scripts/publish_library.py` (using `INSERT ... ON CONFLICT DO UPDATE` to preserve historical rows)
+- backs up the previous database version as a workflow artifact
+- rewrites `packages/isaibox-local/app/data/library-manifest.json`
+- commits and pushes only when the database or manifest actually changed
 
 ---
 
-## Start Airflow
-
-```bash
-bash start.sh
-```
-
-Open **http://localhost:8080** → login `admin` / `admin`
-
-The scraper DAG runs automatically at **06:00 IST every day**.
-
----
-
-## First run — full scrape (all ~4800 albums)
-
-```bash
-bash trigger_full.sh
-```
-
-This sets the `MASSTAMILAN_FULL_SCRAPE` Airflow Variable to `true` and
-triggers an immediate DAG run.  After it completes the variable resets to
-`false` automatically, so all future runs are incremental.
-
-Estimated time: ~2-3 hours for full scrape (polite 0.9s delay between albums).
-
----
-
-## How it works
+## How it works (Scraper)
 
 ```
 discover_new_albums          Walk listing pages 2..N
@@ -195,7 +180,7 @@ write_to_duckdb              Single writer — upserts albums + songs
 export_parquet_and_csv       Writes exports/songs_YYYYMMDD.parquet + songs_latest.csv
         │
         ▼
-log_run_summary              Prints stats to Airflow logs
+log_run_summary              Prints execution stats
 ```
 
 **Incremental logic**: The site lists newest albums first.  Discovery stops
@@ -280,12 +265,10 @@ python3 smoke_scraper.py --json
 | updated_at | TIMESTAMPTZ | |
 
 ### `scrape_runs`
-One row per DAG run — albums added, songs total, status.
+One row per scraper run — albums added, songs total, status.
 
----
-
-## Stop Airflow
-
-```bash
-bash stop.sh
-```
+### User & App State
+- `playlists` and `playlist_songs`
+- `users` and `user_sessions`
+- `favorite_songs`
+- `user_preferences`
