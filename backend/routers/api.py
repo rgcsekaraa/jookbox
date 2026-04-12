@@ -23,7 +23,7 @@ def db_sync_check():
 def stats():
     with get_read_conn() as conn:
         songs = conn.execute("SELECT COUNT(*) FROM songs").fetchone()[0]
-        albums = conn.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
+        albums = conn.execute("SELECT COUNT(*) FROM albums WHERE scrape_ok = TRUE").fetchone()[0]
         latest_year = conn.execute(
             "SELECT MAX(TRY_CAST(year AS INTEGER)) FROM songs WHERE year IS NOT NULL AND year != ''"
         ).fetchone()[0]
@@ -32,6 +32,12 @@ def stats():
         ).fetchone()[0]
     if LOCAL_MODE:
         sync_state = get_db_sync_state()
+        live_songs = sync_state.get("liveSongs")
+        live_albums = sync_state.get("liveAlbums")
+        if isinstance(live_songs, int) and live_songs >= 0:
+            songs = live_songs
+        if isinstance(live_albums, int) and live_albums >= 0:
+            albums = live_albums
         sync_updated_at = (sync_state.get("updatedAt") or "").strip()
         if sync_updated_at:
             latest_updated_at_value = sync_updated_at
