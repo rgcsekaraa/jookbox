@@ -35,14 +35,21 @@ def collect_stats(path: Path) -> dict[str, object]:
         songs = int(conn.execute("SELECT COUNT(*) FROM songs").fetchone()[0])
         albums = int(conn.execute("SELECT COUNT(*) FROM albums").fetchone()[0])
         latest_updated_at = conn.execute(
-            "SELECT MAX(updated_at) FROM songs WHERE updated_at IS NOT NULL"
+            """
+            SELECT CASE
+                WHEN MAX(updated_at) IS NULL THEN ''
+                ELSE REPLACE(CAST(MAX(updated_at) AS VARCHAR), ' +00', 'Z')
+            END
+            FROM songs
+            WHERE updated_at IS NOT NULL
+            """
         ).fetchone()[0]
     finally:
         conn.close()
     return {
         "songs": songs,
         "albums": albums,
-        "latest_song_updated_at": latest_updated_at.isoformat() if latest_updated_at else "",
+        "latest_song_updated_at": latest_updated_at or "",
     }
 
 
