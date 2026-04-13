@@ -3705,7 +3705,7 @@ function App() {
           </div>
         </div>
       </Show>
-      <header class="flex min-w-0 flex-wrap items-center gap-3 border-b border-[var(--line)] px-6 py-4 sm:flex-nowrap sm:justify-between">
+      <header class="flex min-w-0 flex-wrap items-center gap-3 border-b border-[var(--line)] px-4 py-3 sm:px-6 sm:py-4 sm:flex-nowrap sm:justify-between">
         <span class="group relative inline-flex shrink-0 items-center gap-3">
           <BrandIcon />
           <span class="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--brand)]">isaibox</span>
@@ -3723,7 +3723,7 @@ function App() {
             </div>
           </span>
         </span>
-        <div class="ml-auto flex min-w-0 items-center justify-end gap-2 md:gap-3">
+        <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 md:gap-3">
           <div
             ref={(el) => {
               googleButtonRef = el;
@@ -3731,7 +3731,7 @@ function App() {
             aria-hidden="true"
             class="pointer-events-none absolute left-[-9999px] top-0 opacity-0"
           />
-          <div class="flex items-center gap-4">
+          <div class="flex items-center gap-3 sm:gap-4">
             <button
               type="button"
               onClick={() => setShowSettings(!showSettings())}
@@ -4020,9 +4020,9 @@ function App() {
         </section>
       </Show>
 
-      <section class="border-b border-[var(--line)] px-6 py-3">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <div class="flex flex-wrap items-center gap-5 font-mono text-[10px] uppercase tracking-[0.22em]">
+      <section class="border-b border-[var(--line)] px-4 py-3 sm:px-6">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div class="flex overflow-x-auto pb-1 font-mono text-[10px] uppercase tracking-[0.22em] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <button type="button" onClick={() => setMainBrowseTab("library")} class={`px-1 py-1 ${mainTab() === "library" ? "text-[var(--fg)]" : "text-[var(--soft)]"}`}>
               Library
             </button>
@@ -4050,11 +4050,11 @@ function App() {
               </button>
             </Show>
           </div>
-          <div class="flex min-w-[280px] flex-1 items-center justify-end gap-3">
+          <div class="flex min-w-0 flex-1 items-center gap-3 lg:min-w-[280px] lg:justify-end">
             <Show
               when={mainTab() === "library"}
               fallback={
-                <div class="flex h-[42px] w-full max-w-[560px] flex-wrap items-center justify-end gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+                <div class="flex min-h-[42px] w-full flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] lg:max-w-[560px] lg:justify-end">
                   <Show when={mainTab() === "recents"}>
                     <>
                       <span>{recentSongs().length} tracks</span>
@@ -4096,7 +4096,7 @@ function App() {
                 </div>
               }
             >
-              <div class="flex h-[42px] w-full max-w-[560px] items-center gap-3 border border-[var(--line)] px-3">
+              <div class="flex h-[42px] w-full items-center gap-3 border border-[var(--line)] px-3 lg:max-w-[560px]">
                 <span class="font-mono text-sm text-[var(--soft)]">/</span>
                 <input
                   ref={(el) => {
@@ -4709,9 +4709,9 @@ function App() {
             });
             return (
               <>
-              <section class="min-h-0 flex-1 overflow-hidden px-6 py-4">
-                <div class="grid h-full min-h-0 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-                  <aside class="min-h-0 overflow-y-auto border border-[var(--line)] bg-[var(--panel)] p-4">
+              <section class="min-h-0 flex-1 overflow-hidden px-4 py-3 sm:px-6 sm:py-4">
+                <div class="grid h-full min-h-0 gap-3 xl:grid-cols-[280px_minmax(0,1fr)] xl:gap-4">
+                  <aside class="order-2 min-h-0 max-h-[32vh] overflow-y-auto border border-[var(--line)] bg-[var(--panel)] p-4 xl:order-1 xl:max-h-none">
                     <div class="flex items-center gap-2">
                       <input
                         value={playlistNameInput()}
@@ -4772,7 +4772,7 @@ function App() {
                     </div>
                   </aside>
 
-                  <div class="flex min-h-0 flex-col overflow-hidden border border-[var(--line)] bg-[var(--panel)]">
+                  <div class="order-1 flex min-h-0 flex-col overflow-hidden border border-[var(--line)] bg-[var(--panel)] xl:order-2">
                     <Show when={playlistDetailLoading() && !myPlaylistDetail()}>
                       <div class="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
                         <div>
@@ -4865,9 +4865,9 @@ function App() {
           })()}
         </Show>
         <Show when={mainTab() === "library"}>
-          <section class="min-h-0 flex-1 overflow-hidden px-6 py-4">
-            <div class="grid h-full min-h-0 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside class="min-h-0 overflow-y-auto border border-[var(--line)] bg-[var(--panel)] p-4">
+          <section class="min-h-0 flex-1 overflow-hidden px-4 py-3 sm:px-6 sm:py-4">
+            <div class="grid h-full min-h-0 gap-3 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-4">
+              <aside class="order-2 min-h-0 max-h-[34vh] overflow-y-auto border border-[var(--line)] bg-[var(--panel)] p-4 xl:order-1 xl:max-h-none">
                 <div class="flex items-center justify-between gap-3">
                   <div class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">Playlists</div>
                   <Show when={authEnabled() && !user()}>
@@ -4971,10 +4971,10 @@ function App() {
                 </div>
               </aside>
 
-              <div class="flex min-h-0 flex-col overflow-hidden border border-[var(--line)] bg-[var(--panel)]">
+              <div class="order-1 flex min-h-0 flex-col overflow-hidden border border-[var(--line)] bg-[var(--panel)] xl:order-2">
                 <Show when={!playlistDetailLoading() && !playlistDetailError()}>
                   <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-                    <header class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-4">
+                    <header class="flex flex-wrap items-center gap-3 border-b border-[var(--line-soft)] px-4 py-4 sm:px-6">
                       <Show when={libraryNavStack().length > 0}>
                         <button
                           type="button"
@@ -5044,7 +5044,7 @@ function App() {
                         </Show>
                       </div>
 
-                      <div class="flex shrink-0 items-center gap-4">
+                      <div class="flex w-full shrink-0 items-center justify-between gap-4 sm:w-auto sm:justify-start">
                         <Show when={visiblePlaylistDetail() && canManageVisiblePlaylist()}>
                           {(p) => (
                             <div class="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
@@ -5085,7 +5085,7 @@ function App() {
                     </header>
 
                     <Show when={!visiblePlaylistDetail() && mainTab() === "library" && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
-                      <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
+                      <div class="flex items-center gap-4 overflow-x-auto border-b border-[var(--line-soft)] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] sm:px-6">
                         <button
                           type="button"
                           onClick={() => setSearchTab("songs")}
@@ -5114,7 +5114,7 @@ function App() {
                       when={searchTab() === "albums" || searchTab() === "music-directors" || (musicDirectorFilter() && !movieFilter())}
                       fallback={
                         <>
-                          <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2">
+                          <div class="hidden items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 sm:flex">
                             <SortableSongHeader columnKey="default" label="#" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-8 text-right" />
                             <SortableSongHeader columnKey="track" label="Song Name" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="min-w-0 flex-[1.4]" />
                             <SortableSongHeader columnKey="movie" label="Movie" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 md:block" />
@@ -5137,35 +5137,43 @@ function App() {
                                       const active = () => selectedSong()?.id === song.id;
                                       return (
                                         <li>
-                                          <button
-                                            ref={(el) => {
-                                              if (el) rowRefs.set(song.id, el);
-                                              else rowRefs.delete(song.id);
-                                            }}
-                                            type="button"
-                                            onClick={() => loadSong(song, true)}
-                                            class={`flex w-full items-center gap-4 px-4 py-3 text-left transition ${
-                                              active()
-                                                ? currentTrackId() === song.id
-                                                  ? "song-row-active text-[var(--fg)]"
+                                  <button
+                                    ref={(el) => {
+                                      if (el) rowRefs.set(song.id, el);
+                                      else rowRefs.delete(song.id);
+                                    }}
+                                    type="button"
+                                    onClick={() => loadSong(song, true)}
+                                    class={`flex w-full flex-wrap items-start gap-x-3 gap-y-2 px-4 py-3 text-left transition sm:items-center sm:gap-4 ${
+                                      active()
+                                        ? currentTrackId() === song.id
+                                          ? "song-row-active text-[var(--fg)]"
                                                   : "bg-[var(--hover)] text-[var(--fg)]"
                                                 : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
                                             }`}
                                           >
-                                            <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
-                                              {currentTrackId() === song.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
-                                            </span>
-                                            <span class="min-w-0 flex-[1.4] truncate text-sm">{song.track}</span>
-                                            <DrilldownText value={song.movie} payload={{ album: song.movie, albumUrl: song.albumUrl, year: song.year }} onClick={navigateToMovie} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] md:block" />
-                                            <DrilldownText value={song.musicDirector} onClick={navigateToMusicDirector} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] lg:block" />
-                                            <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] xl:block">{song.singers || "-"}</span>
-                                            <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{song.year || "-"}</span>
-                                            <SongRowFavoriteActions
-                                              show={user()}
-                                              class="w-20"
-                                              song={song}
-                                              open={openSongSaveMenuId() === song.id}
-                                              onToggleOpen={() => setOpenSongSaveMenuId((current) => current === song.id ? "" : song.id)}
+                                    <span class="w-8 shrink-0 pt-0.5 text-right font-mono text-xs text-[var(--soft)] sm:pt-0">
+                                      {currentTrackId() === song.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
+                                    </span>
+                                    <div class="min-w-0 flex-1 basis-[calc(100%-2.75rem)] sm:flex-[1.4] sm:basis-auto">
+                                      <div class="truncate text-sm">{song.track}</div>
+                                      <div class="mt-1 flex flex-wrap gap-x-2 gap-y-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--soft)] sm:hidden">
+                                        <Show when={song.movie}><span>{song.movie}</span></Show>
+                                        <Show when={song.musicDirector}><span>{song.musicDirector}</span></Show>
+                                        <Show when={song.singers}><span>{song.singers}</span></Show>
+                                        <Show when={song.year}><span>{song.year}</span></Show>
+                                      </div>
+                                    </div>
+                                    <DrilldownText value={song.movie} payload={{ album: song.movie, albumUrl: song.albumUrl, year: song.year }} onClick={navigateToMovie} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] md:block" />
+                                    <DrilldownText value={song.musicDirector} onClick={navigateToMusicDirector} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] lg:block" />
+                                    <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] xl:block">{song.singers || "-"}</span>
+                                    <span class="hidden w-20 font-mono text-[11px] text-[var(--soft)] sm:block">{song.year || "-"}</span>
+                                    <SongRowFavoriteActions
+                                      show={user()}
+                                      class="ml-auto w-auto sm:w-20"
+                                      song={song}
+                                      open={openSongSaveMenuId() === song.id}
+                                      onToggleOpen={() => setOpenSongSaveMenuId((current) => current === song.id ? "" : song.id)}
                                               songActive={favoriteIdSet().has(song.id)}
                                               albumActive={favoriteAlbumSet().has(albumIdentity(song))}
                                               musicDirectorActive={favoriteMusicDirectorSet().has(song.musicDirector)}
@@ -5189,7 +5197,7 @@ function App() {
                         when={searchTab() === "music-directors" && !musicDirectorFilter()}
                         fallback={
                           <>
-                            <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
+                            <div class="hidden items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] sm:flex">
                               <span class="min-w-0 flex-1">Movie / Album Name</span>
                               <span class="w-20">Year</span>
                               <span class="w-24 text-right">Tracks</span>
@@ -5204,11 +5212,17 @@ function App() {
                                     <button
                                       type="button"
                                       onClick={() => navigateToMovie(album)}
-                                      class="flex w-full items-center gap-4 border-b border-[var(--line-soft)] px-4 py-3 text-left transition hover:bg-[var(--hover)]"
-                                    >
-                                      <span class="min-w-0 flex-1 truncate text-sm">{album.album}</span>
-                                      <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{album.year || "-"}</span>
-                                      <span class="w-24 text-right font-mono text-[11px] text-[var(--soft)]">
+                                    class="flex w-full flex-wrap items-start gap-x-3 gap-y-2 border-b border-[var(--line-soft)] px-4 py-3 text-left transition hover:bg-[var(--hover)] sm:items-center sm:gap-4"
+                                  >
+                                      <div class="min-w-0 flex-1 basis-full sm:basis-auto">
+                                        <div class="truncate text-sm">{album.album}</div>
+                                        <div class="mt-1 flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--soft)] sm:hidden">
+                                          <span>{album.year || "-"}</span>
+                                          <span>{album.count ? `${album.count} songs` : ""}</span>
+                                        </div>
+                                      </div>
+                                      <span class="hidden w-20 font-mono text-[11px] text-[var(--soft)] sm:block">{album.year || "-"}</span>
+                                      <span class="hidden w-24 text-right font-mono text-[11px] text-[var(--soft)] sm:block">
                                         {album.count ? `${album.count} songs` : ""}
                                       </span>
                                       <Show when={user()}>
@@ -5234,7 +5248,7 @@ function App() {
                           </>
                         }
                       >
-                        <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
+                        <div class="hidden items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] sm:flex">
                           <span class="min-w-0 flex-1">Music Director</span>
                           <span class="w-20">Latest</span>
                           <span class="w-24 text-right">Songs</span>
@@ -5389,7 +5403,7 @@ function App() {
                   </Show>
                 }
               >
-                <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2">
+                <div class="hidden items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 sm:flex">
                   <SortableSongHeader columnKey="default" label="#" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="w-8 text-right" />
                   <SortableSongHeader columnKey="track" label="Song Name" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="min-w-0 flex-[1.2]" />
                   <SortableSongHeader columnKey="movie" label="Movie" sortKey={currentSongSort().key} sortDirection={currentSongSort().direction} onSort={toggleSongSort} class="hidden min-w-0 flex-1 md:block" />
@@ -5424,24 +5438,32 @@ function App() {
                                   type="button"
                                   onClick={() => loadSong(song, true)}
                                   title={`Last updated: ${formatUpdatedAt(song.updatedAt)}`}
-                                  class={`flex w-full items-center gap-4 px-6 py-3 text-left transition ${
-                                    active()
-                                      ? currentTrackId() === song.id
-                                        ? "song-row-active text-[var(--fg)]"
+                                class={`flex w-full flex-wrap items-start gap-x-3 gap-y-2 px-4 py-3 text-left transition sm:items-center sm:gap-4 sm:px-6 ${
+                                  active()
+                                    ? currentTrackId() === song.id
+                                      ? "song-row-active text-[var(--fg)]"
                                         : "bg-[var(--hover)] text-[var(--fg)]"
                                       : "bg-transparent text-[var(--fg)] hover:bg-[var(--hover)]"
                                   }`}
                                 >
-                                  <span class="w-8 text-right font-mono text-xs text-[var(--soft)]">
+                                  <span class="w-8 shrink-0 pt-0.5 text-right font-mono text-xs text-[var(--soft)] sm:pt-0">
                                     {currentTrackId() === song.id && isPlaying() && streamStarted() ? <PlayingBars /> : String(index() + 1).padStart(2, "0")}
                                   </span>
-                                  <span class="min-w-0 flex-[1.2] truncate text-sm">{song.track}</span>
+                                  <div class="min-w-0 flex-1 basis-[calc(100%-2.75rem)] sm:flex-[1.2] sm:basis-auto">
+                                    <div class="truncate text-sm">{song.track}</div>
+                                    <div class="mt-1 flex flex-wrap gap-x-2 gap-y-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--soft)] sm:hidden">
+                                      <Show when={song.movie}><span>{song.movie}</span></Show>
+                                      <Show when={song.musicDirector}><span>{song.musicDirector}</span></Show>
+                                      <Show when={song.singers}><span>{song.singers}</span></Show>
+                                      <Show when={song.year}><span>{song.year}</span></Show>
+                                    </div>
+                                  </div>
                                   <DrilldownText value={song.movie} payload={{ album: song.movie, albumUrl: song.albumUrl, year: song.year }} onClick={navigateToMovie} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] md:block" />
                                   <DrilldownText value={song.musicDirector} onClick={navigateToMusicDirector} class="hidden min-w-0 flex-1 font-mono text-[11px] text-[var(--soft)] lg:block" />
                                   <span class="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--soft)] xl:block">
                                     {song.singers || "-"}
                                   </span>
-                                  <span class="w-20 font-mono text-[11px] text-[var(--soft)]">
+                                  <span class="hidden w-20 font-mono text-[11px] text-[var(--soft)] sm:block">
                                     {song.year || "-"}
                                   </span>
                                   <Show
@@ -5449,7 +5471,7 @@ function App() {
                                     fallback={
                                       <SongRowFavoriteActions
                                         show={user()}
-                                        class="w-20"
+                                        class="ml-auto w-auto sm:w-20"
                                         song={song}
                                         open={openSongSaveMenuId() === song.id}
                                         onToggleOpen={() => setOpenSongSaveMenuId((current) => current === song.id ? "" : song.id)}
@@ -5463,7 +5485,7 @@ function App() {
                                     }
                                   >
                                     <Show when={user()}>
-                                      <span class="flex w-20 justify-end">
+                                      <span class="ml-auto flex w-auto justify-end sm:w-20">
                                         <button
                                           type="button"
                                           onClick={(event) => {
@@ -5493,7 +5515,163 @@ function App() {
         </Show>
       </section>
 
-      <footer class="border-t border-[var(--line)] px-6 py-3">
+      <footer class="border-t border-[var(--line)] bg-[var(--bg)] px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-6">
+        <div class="md:hidden">
+          <div class="rounded-[20px] border border-[var(--line)] bg-[var(--hover)] px-3 py-3">
+            <div class="flex items-start gap-3">
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center border border-[var(--line)] font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--soft)]">
+                <Show when={currentSong() && isPlaying() && streamStarted()} fallback={"Play"}>
+                  <PlayingBars />
+                </Show>
+              </div>
+              <div class="min-w-0 flex-1">
+                <Show when={currentSong()} fallback={<p class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--muted)]">No track selected</p>}>
+                  {(song) => (
+                    <>
+                      <p class="truncate text-sm font-semibold">{song().track}</p>
+                      <div class="mt-1 flex flex-wrap gap-x-2 gap-y-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--soft)]">
+                        <Show when={song().movie}><span>{song().movie}</span></Show>
+                        <Show when={song().singers}><span>{song().singers}</span></Show>
+                      </div>
+                    </>
+                  )}
+                </Show>
+              </div>
+              <div class="flex shrink-0 items-center gap-1.5">
+                <Show when={user() && currentSong()}>
+                  <button
+                    type="button"
+                    onClick={() => void toggleFavorite(currentSong().id)}
+                    aria-label={favoriteIdSet().has(currentSong()?.id) ? "Remove from favorites" : "Add to favorites"}
+                    class={`flex h-9 w-9 items-center justify-center rounded-full border transition ${
+                      favoriteIdSet().has(currentSong()?.id)
+                        ? "border-[var(--fg)] text-[var(--fg)]"
+                        : "border-[var(--line)] text-[var(--soft)]"
+                    }`}
+                  >
+                    <HeartIcon filled={favoriteIdSet().has(currentSong()?.id)} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveCurrentToPlaylist()}
+                    aria-label="Add to playlist"
+                    class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)]"
+                  >
+                    <PlusIcon />
+                  </button>
+                </Show>
+              </div>
+            </div>
+
+            <div class="mt-3 flex items-center gap-2">
+              <span class="w-9 text-right font-mono text-[10px] text-[var(--muted)]">{formatTime(currentTime())}</span>
+              <input
+                type="range"
+                min="0"
+                max={duration() || 0}
+                step="0.1"
+                value={currentTime()}
+                onInput={(event) => {
+                  if (radioPlaybackLocked()) {
+                    return;
+                  }
+                  const next = Number(event.currentTarget.value);
+                  const activeAudio = getActiveAudio();
+                  if (activeAudio) {
+                    activeAudio.currentTime = next;
+                  }
+                  setCurrentTime(next);
+                }}
+                class="flex-1"
+                disabled={radioPlaybackLocked()}
+                style={{ "accent-color": "var(--fg)" }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowRemainingTime((prev) => !prev)}
+                class="w-11 text-right font-mono text-[10px] text-[var(--muted)]"
+              >
+                {showRemainingTime() ? `-${formatTime(Math.max(0, duration() - currentTime()))}` : formatTime(duration())}
+              </button>
+            </div>
+
+            <div class="mt-3 flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => selectRelative(-1, true, currentTrackId() || selectedId(), { allowCrossfade: true })}
+                  disabled={radioPlaybackLocked()}
+                  aria-label="Previous"
+                  class="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] disabled:opacity-40"
+                >
+                  <PrevIcon />
+                </button>
+                <button
+                  type="button"
+                  onClick={togglePlayback}
+                  aria-label={isPlaying() ? (streamStarted() ? "Pause" : "Loading") : "Play"}
+                  class="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--fg)] text-[var(--fg)]"
+                >
+                  {isPlaying() ? (streamStarted() ? <PauseIcon /> : <LoadingSpinnerIcon />) : <PlayIcon />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectRelative(1, true, currentTrackId() || selectedId(), { allowCrossfade: true })}
+                  disabled={radioPlaybackLocked()}
+                  aria-label="Next"
+                  class="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] disabled:opacity-40"
+                >
+                  <NextIcon />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={cyclePlaybackMode}
+                disabled={radioPlaybackLocked()}
+                aria-label={radioPlaybackLocked() ? "Playback mode locked for radio" : `Playback mode: ${playbackModeLabel()}`}
+                class={`flex h-10 min-w-[3rem] items-center justify-center rounded-full border px-2 ${
+                  repeatMode() !== "off" && !radioPlaybackLocked()
+                    ? "border-[var(--fg)] text-[var(--fg)]"
+                    : "border-[var(--line)] text-[var(--soft)]"
+                } disabled:opacity-40`}
+              >
+                {playbackModeIcon()}
+              </button>
+            </div>
+
+            <div class="mt-3 grid grid-cols-[auto_auto_1fr_auto] items-center gap-2">
+              <button
+                type="button"
+                onClick={cyclePlaybackSpeed}
+                aria-label={playbackSpeedLabel()}
+                class="flex h-9 min-w-[3.25rem] items-center justify-center rounded-full border border-[var(--line)] px-2 text-[var(--soft)]"
+              >
+                <SpeedIcon speed={playbackSpeed()} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setMuted((value) => !value)}
+                aria-label={muted() ? "Unmute" : "Mute"}
+                class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)]"
+              >
+                <VolumeIcon muted={muted() || volume() === 0} />
+              </button>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={volume()}
+                onInput={(event) => setVolume(Number(event.currentTarget.value))}
+                class="w-full"
+                style={{ "accent-color": "var(--fg)" }}
+              />
+              <span class="w-8 text-right font-mono text-[10px] text-[var(--muted)]">{Math.round(muted() ? 0 : volume() * 100)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hidden md:block">
         <div class="mb-2 flex justify-center">
           <div class="min-w-0 max-w-2xl text-center">
             <Show when={currentSong()} fallback={<p class="font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">No track selected</p>}>
@@ -5612,6 +5790,7 @@ function App() {
             />
             <span class="w-6 text-right font-mono text-[10px] text-[var(--muted)]">{Math.round(muted() ? 0 : volume() * 100)}</span>
           </div>
+        </div>
         </div>
         <For each={[0, 1]}>
           {(deckIndex) => (
