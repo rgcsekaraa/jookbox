@@ -5765,7 +5765,7 @@ function App() {
             <button
               type="button"
               onClick={() => setShowMobilePlayerPanel(true)}
-              class="flex w-full items-start gap-4 text-left"
+              class="flex w-full items-center gap-3 text-left"
               aria-label="Open now playing controls"
             >
               <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] border border-[var(--line)] bg-[rgba(255,255,255,0.04)] font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--soft)]">
@@ -5777,7 +5777,7 @@ function App() {
                 <Show when={currentSong()} fallback={<p class="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--muted)]">No track selected</p>}>
                   {(song) => (
                     <>
-                      <p class="truncate text-base font-semibold">{song().track}</p>
+                      <p class="truncate text-sm font-semibold">{song().track}</p>
                       <div class="mt-1 flex flex-wrap gap-x-2 gap-y-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--soft)]">
                         <Show when={song().movie}><span>{song().movie}</span></Show>
                         <Show when={song().singers}><span>{song().singers}</span></Show>
@@ -5786,8 +5786,27 @@ function App() {
                   )}
                 </Show>
               </div>
-              <div class="shrink-0 rounded-full border border-[var(--line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--soft)]">
-                Pull up
+              <Show when={user() && currentSong()}>
+                <span class="shrink-0">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void toggleFavorite(currentSong().id);
+                    }}
+                    aria-label={favoriteIdSet().has(currentSong()?.id) ? "Remove from favorites" : "Add to favorites"}
+                    class={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+                      favoriteIdSet().has(currentSong()?.id)
+                        ? "border-[var(--fg)] text-[var(--fg)]"
+                        : "border-[var(--line)] text-[var(--soft)]"
+                    }`}
+                  >
+                    <HeartIcon filled={favoriteIdSet().has(currentSong()?.id)} />
+                  </button>
+                </span>
+              </Show>
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)]">
+                <ChevronDownIcon />
               </div>
             </button>
 
@@ -5855,31 +5874,6 @@ function App() {
             <div class="mt-4 flex flex-wrap gap-2">
               <div class="flex min-h-[44px] items-center rounded-full border border-[var(--line)] px-4 text-sm text-[var(--soft)]">
                 Pull up for full controls
-              </div>
-            </div>
-
-            <div class="mt-3 rounded-[20px] border border-[var(--line)] bg-[rgba(255,255,255,0.03)] px-3 py-3">
-              <div class="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setMuted((value) => !value)}
-                  aria-label={muted() ? "Unmute" : "Mute"}
-                  class="flex h-10 min-w-[76px] items-center justify-center gap-2 rounded-full border border-[var(--line)] px-3 text-sm text-[var(--soft)]"
-                >
-                  <VolumeIcon muted={muted() || volume() === 0} />
-                  <span>{muted() ? "Muted" : "Sound"}</span>
-                </button>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={volume()}
-                  onInput={(event) => setVolume(Number(event.currentTarget.value))}
-                  class="w-full"
-                  style={{ "accent-color": "var(--fg)" }}
-                />
-                <span class="w-8 text-right font-mono text-[10px] text-[var(--muted)]">{Math.round(muted() ? 0 : volume() * 100)}</span>
               </div>
             </div>
           </div>
@@ -6169,6 +6163,9 @@ function App() {
               </div>
 
               <div class="mt-4 rounded-[22px] border border-[var(--line)] bg-[rgba(255,255,255,0.03)] px-4 py-4">
+                <div class="mb-3 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--soft)]">
+                  Sound
+                </div>
                 <div class="flex items-center gap-3">
                   <button
                     type="button"
@@ -6176,7 +6173,7 @@ function App() {
                     class="flex h-11 min-w-[88px] items-center justify-center gap-2 rounded-full border border-[var(--line)] px-3 text-sm text-[var(--soft)]"
                   >
                     <VolumeIcon muted={muted() || volume() === 0} />
-                    <span>{muted() ? "Muted" : "Sound"}</span>
+                    <span>{muted() ? "Muted" : "Mute"}</span>
                   </button>
                   <input
                     type="range"
