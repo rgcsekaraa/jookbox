@@ -1314,12 +1314,15 @@ def write_db_sync_state() -> None:
 
 
 def read_local_db_manifest() -> dict:
+    db_path = Path(db.DUCKDB_PATH)
     if LOCAL_DB_MANIFEST_PATH.exists():
         try:
-            return json.loads(LOCAL_DB_MANIFEST_PATH.read_text())
+            manifest = json.loads(LOCAL_DB_MANIFEST_PATH.read_text())
+            expected_size = int(manifest.get("size") or 0)
+            if db_path.exists() and (not expected_size or db_path.stat().st_size == expected_size):
+                return manifest
         except Exception:
             pass
-    db_path = Path(db.DUCKDB_PATH)
     if not db_path.exists():
         return {}
     stat = db_path.stat()

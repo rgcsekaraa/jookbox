@@ -13,9 +13,9 @@ exports/
 *.parquet
 *.csv
 !packages/isaibox-local/app/data/
-!packages/isaibox-local/app/data/masstamilan.duckdb
 !packages/isaibox-local/app/data/library-manifest.json
 packages/isaibox-local/app/data/db-sync-state.json
+packages/isaibox-local.zip
 
 # Python artifacts
 __pycache__/

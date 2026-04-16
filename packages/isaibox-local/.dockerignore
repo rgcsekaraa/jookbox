@@ -5,3 +5,6 @@ app/__pycache__
 app/.cache
 app/airflow_home
 app/*.log
+app/data/*.duckdb
+app/data/*.download
+app/data/*.previous

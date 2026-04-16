@@ -5,7 +5,7 @@ It is intentionally trimmed for local playback and packaged library updates, not
 
 ## What it does
 
-- runs against the shared repo DuckDB in `../../data/masstamilan.duckdb` so local and main app use the same library file
+- downloads the packaged DuckDB from the release-backed manifest on first run and keeps it in the Docker library volume
 - keeps only the local playback app and packaged database flow
 - disables login, Google auth, Spotify import, radio, and admin UI
 - uses a built-in local profile so favorites and playlists still work without sign-in
@@ -79,11 +79,27 @@ docker compose logs -f
 docker compose down
 ```
 
+## Publish a library update
+
+The packaged DuckDB is distributed as a GitHub Release asset instead of a Git blob.
+After refreshing `app/data/masstamilan.duckdb`, publish it with:
+
+```bash
+./publish-library-release.sh
+git add app/data/library-manifest.json
+git commit -m "chore(data): refresh local library manifest"
+git push origin HEAD:main
+```
+
+The script updates `app/data/library-manifest.json` and uploads the database to
+`https://github.com/rgcsekaraa/isaibox/releases/tag/local-library`.
+
 ## Notes
 
 - local mode hides account/login actions and only exposes the local library experience
 - the backend image only includes the runtime files needed for local playback, caching, and packaged DB sync
-- the shared library database stays in `../../data/masstamilan.duckdb`
+- the live library database stays in the Docker `isaibox-local-library` volume
+- the packaged DuckDB is not committed to Git; `app/data/library-manifest.json` points to the downloadable release asset
 - package-local state files stay in `app/data`, `app/exports`, and `app/.cache`
 - cached audio is stored in `app/.cache/audio`
 - the app trims oldest cached songs automatically when the cache grows past `ISAIBOX_CACHE_LIMIT_GB`
