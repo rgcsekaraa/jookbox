@@ -4960,12 +4960,12 @@ function App() {
                   </aside>
 
                   <div class="order-2 flex min-h-0 flex-col overflow-y-auto border border-[var(--line)] bg-[var(--panel)] xl:order-2 xl:overflow-hidden">
-                    <div class="border-b border-[var(--line-soft)] px-4 py-4 xl:hidden">
+                    <div class="mobile-section-pad border-b border-[var(--line-soft)] xl:hidden">
                       <Show
                         when={showMobilePlaylistPicker()}
                         fallback={
                           <>
-                            <div class="flex items-start justify-between gap-3 rounded-[24px] border border-[var(--line)] bg-[var(--hover)] px-4 py-4">
+                            <div class="mobile-card flex items-start justify-between gap-3">
                               <div class="min-w-0">
                                 <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Playlist</div>
                                 <Show when={selectedPlaylistDetail()} fallback={<div class="mt-2 text-lg font-semibold">No playlist selected</div>}>
@@ -5060,7 +5060,7 @@ function App() {
                                             setShowMobilePlaylistPicker(false);
                                             void openGlobalPlaylist(playlist.id);
                                           }}
-                                          class="flex w-full items-center justify-between gap-3 rounded-[18px] border border-[var(--line)] bg-[var(--hover)] px-4 py-3 text-left text-[var(--fg)] transition"
+                                          class="mobile-list-row flex w-full items-center justify-between gap-3 text-left text-[var(--fg)] transition"
                                         >
                                           <div class="min-w-0">
                                             <div class="truncate text-sm font-semibold">{playlist.name}</div>
@@ -5087,7 +5087,7 @@ function App() {
                                             setShowMobilePlaylistPicker(false);
                                             void openGlobalPlaylist(playlist.id);
                                           }}
-                                          class="flex w-full items-center justify-between gap-3 rounded-[18px] border border-[var(--line)] bg-[var(--hover)] px-4 py-3 text-left text-[var(--fg)] transition"
+                                          class="mobile-list-row flex w-full items-center justify-between gap-3 text-left text-[var(--fg)] transition"
                                         >
                                           <div class="min-w-0">
                                             <div class="truncate text-sm font-semibold">{playlist.name}</div>
@@ -5103,12 +5103,12 @@ function App() {
                                 </div>
                               </Show>
                               <Show when={!normalizedPlaylistSearch() && ((mobilePlaylistSection() === "yours" && filteredUserPlaylists().length === 0) || (mobilePlaylistSection() === "global" && filteredGlobalPlaylists().length === 0))}>
-                                <div class="rounded-[18px] border border-[var(--line)] px-4 py-3 text-sm text-[var(--soft)]">
+                                <div class="mobile-card text-sm text-[var(--soft)]">
                                   No playlists yet.
                                 </div>
                               </Show>
                               <Show when={normalizedPlaylistSearch() && ((mobilePlaylistSection() === "yours" && filteredUserPlaylists().length === 0) || (mobilePlaylistSection() === "global" && filteredGlobalPlaylists().length === 0))}>
-                                <div class="rounded-[18px] border border-[var(--line)] px-4 py-3 text-sm text-[var(--soft)]">
+                                <div class="mobile-card text-sm text-[var(--soft)]">
                                   No playlists match that search.
                                 </div>
                               </Show>
@@ -5487,10 +5487,10 @@ function App() {
                     </header>
 
                     <Show when={mainTab() === "library"}>
-                      <div class="border-b border-[var(--line-soft)] px-4 py-4 xl:hidden">
+                      <div class="mobile-section-pad border-b border-[var(--line-soft)] xl:hidden">
                         <Show when={visiblePlaylistDetail()}>
                           {(playlist) => (
-                            <div class="flex items-start justify-between gap-3 rounded-[22px] border border-[var(--line)] bg-[var(--hover)] p-4">
+                            <div class="mobile-card flex items-start justify-between gap-3">
                               <div class="min-w-0">
                                 <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Playlist</div>
                                 <div class="mt-2 truncate text-lg font-semibold">{playlist().name}</div>
@@ -5512,7 +5512,7 @@ function App() {
                           )}
                         </Show>
                         <Show when={!visiblePlaylistDetail() && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
-                          <div class="rounded-[24px] border border-[var(--line)] bg-[var(--hover)] px-4 py-4">
+                          <div class="mobile-card">
                             <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Mobile library</div>
                             <div class="mt-2 text-lg font-semibold">Your music, built for touch.</div>
                             <div class="mt-2 text-sm text-[var(--soft)]">
@@ -5548,7 +5548,7 @@ function App() {
                     </Show>
 
                     <Show when={!visiblePlaylistDetail() && mainTab() === "library" && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
-                      <div class="flex items-center gap-2 overflow-x-auto border-b border-[var(--line-soft)] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] sm:gap-4 sm:px-6">
+                      <div class="mobile-tab-row font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] sm:gap-4 sm:px-6">
                         <button
                           type="button"
                           onClick={() => setSearchTab("songs")}
@@ -5668,7 +5668,7 @@ function App() {
                                     <button
                                       type="button"
                                       onClick={() => navigateToMovie(album)}
-                                    class="flex w-full flex-wrap items-start gap-x-3 gap-y-2 border-b border-[var(--line-soft)] px-4 py-3 text-left transition hover:bg-[var(--hover)] sm:items-center sm:gap-4"
+                                    class="mobile-list-row flex w-full flex-wrap items-start gap-x-3 gap-y-2 text-left transition hover:bg-[var(--hover)] sm:items-center sm:gap-4"
                                   >
                                       <div class="min-w-0 flex-1 basis-full sm:basis-auto">
                                         <div class="truncate text-sm">{album.album}</div>
@@ -5719,7 +5719,7 @@ function App() {
                                 <button
                                   type="button"
                                   onClick={() => navigateToMusicDirector(director.musicDirector)}
-                                  class="flex w-full items-center gap-4 border-b border-[var(--line-soft)] px-4 py-3 text-left transition hover:bg-[var(--hover)]"
+                                  class="mobile-list-row flex w-full items-center gap-4 text-left transition hover:bg-[var(--hover)]"
                                 >
                                   <span class="min-w-0 flex-1 truncate text-sm">{director.musicDirector}</span>
                                   <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{director.latestYear || "-"}</span>
@@ -5757,12 +5757,12 @@ function App() {
           <section class="min-h-0 flex-1 overflow-hidden px-4 py-3 sm:px-6 sm:py-4">
             <div class="flex h-full min-h-0 flex-col overflow-hidden border border-[var(--line)] bg-[var(--panel)]">
               <Show when={mainTab() === "favorites"}>
-                <div class="border-b border-[var(--line-soft)] px-4 py-4 sm:px-6">
-                  <div class="rounded-[24px] border border-[var(--line)] bg-[var(--hover)] px-4 py-4 sm:hidden">
+                <div class="mobile-section-pad border-b border-[var(--line-soft)] sm:px-6">
+                  <div class="mobile-card sm:hidden">
                     <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Favorites</div>
                     <div class="mt-2 text-lg font-semibold">Your pinned songs, albums, and composers.</div>
                   </div>
-                  <div class="mt-0 flex gap-2 overflow-x-auto font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] sm:mt-0">
+                  <div class="mt-3 flex gap-2 overflow-x-auto font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] sm:mt-0">
                     <button
                       type="button"
                       onClick={() => setFavoritesTab("songs")}
@@ -5794,7 +5794,7 @@ function App() {
                     when={favoritesTab() === "albums"}
                     fallback={
                       <>
-                        <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
+                        <div class="hidden items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] sm:flex">
                           <span class="min-w-0 flex-1">Music Director</span>
                           <span class="w-20">Latest</span>
                           <span class="w-24 text-right">Songs</span>
@@ -5813,7 +5813,7 @@ function App() {
                                   <button
                                     type="button"
                                     onClick={() => navigateToMusicDirector(director.musicDirector)}
-                                    class="flex w-full items-center gap-4 px-6 py-3 text-left transition hover:bg-[var(--hover)]"
+                                    class="mobile-list-row flex w-full items-center gap-4 text-left transition hover:bg-[var(--hover)]"
                                   >
                                     <span class="min-w-0 flex-1 truncate text-sm">{director.musicDirector}</span>
                                     <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{director.latestYear || "-"}</span>
@@ -5842,7 +5842,7 @@ function App() {
                       </>
                     }
                   >
-                    <div class="flex items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)]">
+                    <div class="hidden items-center gap-4 border-b border-[var(--line-soft)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--faint)] sm:flex">
                       <span class="min-w-0 flex-1">Album</span>
                       <span class="w-20">Year</span>
                       <span class="w-24 text-right">Songs</span>
@@ -5861,7 +5861,7 @@ function App() {
                               <button
                                 type="button"
                                 onClick={() => navigateToMovie(album)}
-                                class="flex w-full items-center gap-4 px-6 py-3 text-left transition hover:bg-[var(--hover)]"
+                                class="mobile-list-row flex w-full items-center gap-4 text-left transition hover:bg-[var(--hover)]"
                               >
                                 <span class="min-w-0 flex-1 truncate text-sm">{album.album}</span>
                                 <span class="w-20 font-mono text-[11px] text-[var(--soft)]">{album.year || "-"}</span>
