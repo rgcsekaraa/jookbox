@@ -3052,14 +3052,18 @@ def is_playable_upstream_response(response: requests.Response | None) -> bool:
     return response.status_code in (200, 206) and is_audio_content_type(content_type)
 
 
-def safe_external_audio_redirect(url: str | None, referer: str | None = None):
+def safe_external_audio_redirect(url: str | None, referer: str | None = None, metadata: dict | None = None):
     if not url:
         return None
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
     if AUDIO_PROXY_URL:
-        proxy_query = urlencode({"url": url, "referer": referer or ""})
+        proxy_payload = {"url": url, "referer": referer or ""}
+        for key, value in (metadata or {}).items():
+            if value is not None:
+                proxy_payload[key] = str(value)
+        proxy_query = urlencode(proxy_payload)
         return Response(status_code=302, headers={"Location": f"{AUDIO_PROXY_URL}?{proxy_query}"})
     return Response(status_code=302, headers={"Location": url})
 
