@@ -4454,11 +4454,16 @@ function App() {
             <button type="button" onClick={() => setMainBrowseTab("library")} class={`shrink-0 rounded-full border px-3 py-2 transition sm:border-transparent sm:px-1 sm:py-1 ${mainTab() === "library" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] sm:bg-transparent sm:text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>
               Library
             </button>
-            <button type="button" onClick={() => setMainBrowseTab("recents")} class={`shrink-0 rounded-full border px-3 py-2 transition sm:border-transparent sm:px-1 sm:py-1 ${mainTab() === "recents" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] sm:bg-transparent sm:text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>
-              Recents {recentSongs().length ? `(${recentSongs().length})` : ""}
-            </button>
+            <Show when={localMode()}>
+              <button type="button" onClick={() => setMainBrowseTab("playlists")} class={`shrink-0 rounded-full border px-3 py-2 transition sm:border-transparent sm:px-1 sm:py-1 ${mainTab() === "playlists" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] sm:bg-transparent sm:text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>
+                Playlists {playlists().length ? `(${playlists().length})` : ""}
+              </button>
+            </Show>
             <button type="button" onClick={() => setMainBrowseTab("queue")} class={`shrink-0 rounded-full border px-3 py-2 transition sm:border-transparent sm:px-1 sm:py-1 ${mainTab() === "queue" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] sm:bg-transparent sm:text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>
               Queue {playQueue().length ? `(${playQueue().length})` : ""}
+            </button>
+            <button type="button" onClick={() => setMainBrowseTab("recents")} class={`shrink-0 rounded-full border px-3 py-2 transition sm:border-transparent sm:px-1 sm:py-1 ${mainTab() === "recents" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] sm:bg-transparent sm:text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>
+              Recents {recentSongs().length ? `(${recentSongs().length})` : ""}
             </button>
             <Show when={libraryProfileEnabled()}>
               <button type="button" onClick={() => setMainBrowseTab("favorites")} class={`shrink-0 rounded-full border px-3 py-2 transition sm:border-transparent sm:px-1 sm:py-1 ${mainTab() === "favorites" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] sm:bg-transparent sm:text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>
@@ -4468,11 +4473,6 @@ function App() {
             <Show when={radioEnabled()}>
               <button type="button" onClick={() => setMainBrowseTab("radio")} class={`shrink-0 rounded-full border px-3 py-2 transition sm:border-transparent sm:px-1 sm:py-1 ${mainTab() === "radio" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] sm:bg-transparent sm:text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>
                 Radio
-              </button>
-            </Show>
-            <Show when={localMode()}>
-              <button type="button" onClick={() => setMainBrowseTab("playlists")} class={`shrink-0 rounded-full border px-3 py-2 transition sm:border-transparent sm:px-1 sm:py-1 ${mainTab() === "playlists" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] sm:bg-transparent sm:text-[var(--fg)]" : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}>
-                Playlists {playlists().length ? `(${playlists().length})` : ""}
               </button>
             </Show>
             <Show when={authEnabled() && user()?.is_admin}>
