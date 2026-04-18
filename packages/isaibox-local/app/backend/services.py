@@ -26,7 +26,7 @@ import requests
 from bs4 import BeautifulSoup
 from fastapi.concurrency import run_in_threadpool
 from fastapi import FastAPI, Request as FastAPIRequest
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 import uvicorn
 
 import db
@@ -3060,8 +3060,8 @@ def safe_external_audio_redirect(url: str | None, referer: str | None = None):
         return None
     if AUDIO_PROXY_URL:
         proxy_query = urlencode({"url": url, "referer": referer or ""})
-        return RedirectResponse(f"{AUDIO_PROXY_URL}?{proxy_query}", status_code=302)
-    return RedirectResponse(url, status_code=302)
+        return Response(status_code=302, headers={"Location": f"{AUDIO_PROXY_URL}?{proxy_query}"})
+    return Response(status_code=302, headers={"Location": url})
 
 
 def build_upstream_headers(song_id: str | None = None, album_url: str | None = None) -> dict[str, str]:
