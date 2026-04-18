@@ -565,6 +565,7 @@ function App() {
   const [showMobileMenu, setShowMobileMenu] = createSignal(false);
   const [showMobilePlayerPanel, setShowMobilePlayerPanel] = createSignal(false);
   const [showMobilePlaylistPicker, setShowMobilePlaylistPicker] = createSignal(false);
+  const [isCompactLayout, setIsCompactLayout] = createSignal(false);
   const [mobilePlaylistSection, setMobilePlaylistSection] = createSignal("global");
   const [playlistBrowseSection, setPlaylistBrowseSection] = createSignal("global");
   const [mobilePlayerDragOffset, setMobilePlayerDragOffset] = createSignal(0);
@@ -648,8 +649,14 @@ function App() {
     }
     return globalPlaylistDetail();
   });
+  const libraryPlaylistDetail = createMemo(() => {
+    if (mainTab() === "library" && isCompactLayout()) {
+      return null;
+    }
+    return visiblePlaylistDetail();
+  });
   const canManageVisiblePlaylist = createMemo(() => {
-    const playlist = visiblePlaylistDetail();
+    const playlist = libraryPlaylistDetail();
     const account = user();
     if (!playlist || !account) {
       return false;
@@ -1190,7 +1197,7 @@ function App() {
         .some((value) => String(value).toLowerCase().includes(needle))
     );
   });
-  const showPlaylistDetail = createMemo(() => Boolean(visiblePlaylistDetail()));
+  const showPlaylistDetail = createMemo(() => Boolean(libraryPlaylistDetail()));
   const currentRadioStation = createMemo(() => radioStations().find((station) => station.id === selectedRadioStationId()) || null);
   const radioPlaybackLocked = createMemo(() => mainTab() === "radio");
   const songSortScope = createMemo(() => {
@@ -3581,6 +3588,7 @@ function App() {
     };
 
     const onResize = () => {
+      setIsCompactLayout(window.innerWidth < 1280);
       if (window.innerWidth >= 640) {
         setShowMobileMenu(false);
       }
@@ -3593,6 +3601,7 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("resize", onResize);
+    onResize();
     const onBrowserOnline = () => {
       void verifyAppOnline();
     };
@@ -5668,7 +5677,7 @@ function App() {
                   <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
                     <header
                       class={`flex flex-wrap items-center gap-3 border-b border-[var(--line-soft)] px-4 py-4 sm:px-6 ${
-                        visiblePlaylistDetail() && !movieFilter() && !artistFilter() && !musicDirectorFilter()
+                        libraryPlaylistDetail() && !movieFilter() && !artistFilter() && !musicDirectorFilter()
                           ? "hidden xl:flex"
                           : ""
                       }`}
@@ -5683,7 +5692,7 @@ function App() {
                         </button>
                       </Show>
                       <div class="min-w-0 flex-1">
-                        <Show when={visiblePlaylistDetail()}>
+                        <Show when={libraryPlaylistDetail()}>
                           {(playlist) => (
                             <div class="hidden xl:block">
                               <div class="truncate text-sm font-semibold">{playlist().name}</div>
@@ -5693,7 +5702,7 @@ function App() {
                             </div>
                           )}
                         </Show>
-                        <Show when={!visiblePlaylistDetail() && (movieFilter() || artistFilter() || musicDirectorFilter())}>
+                        <Show when={!libraryPlaylistDetail() && (movieFilter() || artistFilter() || musicDirectorFilter())}>
                           <>
                             <Show when={movieFilter()}>
                               <div class="flex items-center gap-3">
@@ -5735,7 +5744,7 @@ function App() {
                             </div>
                           </>
                         </Show>
-                        <Show when={!visiblePlaylistDetail() && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
+                        <Show when={!libraryPlaylistDetail() && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
                           <div class="hidden truncate text-sm font-semibold uppercase tracking-widest text-[var(--faint)] xl:block">
                             {searchTab() === "albums" ? `Albums · ${visibleAlbums().length}` : searchTab() === "music-directors" ? `Music Directors · ${visibleMusicDirectors().length}` : `Songs · ${visibleResults().length}`}
                           </div>
@@ -5743,7 +5752,7 @@ function App() {
                       </div>
 
                       <div class="flex w-full shrink-0 items-center justify-between gap-4 sm:w-auto sm:justify-start">
-                        <Show when={visiblePlaylistDetail() && canManageVisiblePlaylist()}>
+                        <Show when={libraryPlaylistDetail() && canManageVisiblePlaylist()}>
                           {(p) => (
                             <div class="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
                               <button
@@ -5765,7 +5774,7 @@ function App() {
                             </div>
                           )}
                         </Show>
-                        <Show when={!visiblePlaylistDetail() && (movieFilter() || artistFilter() || musicDirectorFilter()) && libraryNavStack().length === 0}>
+                        <Show when={!libraryPlaylistDetail() && (movieFilter() || artistFilter() || musicDirectorFilter()) && libraryNavStack().length === 0}>
                           <button
                             type="button"
                             onClick={() => {
@@ -5782,9 +5791,9 @@ function App() {
                       </div>
                     </header>
 
-                    <Show when={mainTab() === "library" && visiblePlaylistDetail()}>
+                    <Show when={mainTab() === "library" && libraryPlaylistDetail()}>
                       <div class="mobile-section-pad border-b border-[var(--line-soft)] xl:hidden">
-                        <Show when={visiblePlaylistDetail()}>
+                        <Show when={libraryPlaylistDetail()}>
                           {(playlist) => (
                             <div class="mobile-card flex items-start justify-between gap-3">
                               <div class="min-w-0">
@@ -5810,7 +5819,7 @@ function App() {
                       </div>
                     </Show>
 
-                    <Show when={!visiblePlaylistDetail() && mainTab() === "library" && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
+                    <Show when={!libraryPlaylistDetail() && mainTab() === "library" && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
                       <div class="mobile-tab-row font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)] sm:gap-4 sm:px-6">
                         <button
                           type="button"
