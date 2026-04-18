@@ -353,8 +353,8 @@ const SongRowQueueButton = (props) => (
         props.onClick?.();
       }}
       class={`transition-colors ${props.active ? "text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"}`}
-      aria-label={props.active ? "Add another to queue" : "Add to queue"}
-      title={props.active ? "Add another to queue" : "Add to queue"}
+      aria-label={props.active ? "Already in queue" : "Add to queue"}
+      title={props.active ? "Already in queue" : "Add to queue"}
     >
       <QueueIcon />
     </button>
@@ -3161,6 +3161,10 @@ function App() {
     if (!song?.id) {
       return;
     }
+    if (queuedSongIds().has(song.id)) {
+      setAccountMessage(`${song.track || "Song"} is already in queue`);
+      return;
+    }
     setPlayQueue((current) => [...current, makeQueueEntry(song.id)]);
     setAccountMessage(`${song.track || "Song"} added to queue`);
   };
@@ -5840,15 +5844,6 @@ function App() {
                             </div>
                           )}
                         </Show>
-                        <Show when={!visiblePlaylistDetail() && !movieFilter() && !artistFilter() && !musicDirectorFilter()}>
-                          <div class="mobile-card">
-                            <div class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Mobile library</div>
-                            <div class="mt-2 text-lg font-semibold">Your music, built for touch.</div>
-                            <div class="mt-2 text-sm text-[var(--soft)]">
-                              {visibleResults().length} songs ready. Pick a lane, jump between playlists, and keep playback controls close.
-                            </div>
-                          </div>
-                        </Show>
                       </div>
                     </Show>
 
@@ -6542,13 +6537,17 @@ function App() {
                 <button
                   type="button"
                   onClick={addCurrentSongToQueue}
-                  aria-label="Add current song to queue"
-                  class="flex h-8 items-center gap-2 rounded-full border border-[var(--line)] px-3 text-[var(--soft)] transition hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                  aria-label={queuedSongIds().has(currentSong()?.id) ? "Already in queue" : "Add current song to queue"}
+                  class={`flex h-8 items-center gap-2 rounded-full border px-3 transition ${
+                    queuedSongIds().has(currentSong()?.id)
+                      ? "border-[var(--fg)] text-[var(--fg)]"
+                      : "border-[var(--line)] text-[var(--soft)] hover:border-[var(--fg)] hover:text-[var(--fg)]"
+                  }`}
                 >
                   <QueueIcon />
                   <span class="font-mono text-[10px] uppercase tracking-[0.18em]">Queue</span>
                 </button>
-                <TooltipBubble text="Add to queue" position="bottom-full left-0 mb-2" />
+                <TooltipBubble text={queuedSongIds().has(currentSong()?.id) ? "Already in queue" : "Add to queue"} position="bottom-full left-0 mb-2" />
               </span>
             </Show>
           </div>
@@ -6761,8 +6760,12 @@ function App() {
                       setShowMobileVolumeSlider(false);
                       addCurrentSongToQueue();
                     }}
-                    aria-label="Add to queue"
-                    class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)]"
+                    aria-label={queuedSongIds().has(currentSong()?.id) ? "Already in queue" : "Add to queue"}
+                    class={`inline-flex h-9 w-9 items-center justify-center rounded-full border ${
+                      queuedSongIds().has(currentSong()?.id)
+                        ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)]"
+                        : "border-[var(--line)] text-[var(--soft)]"
+                    }`}
                   >
                     <QueueIcon />
                   </button>
