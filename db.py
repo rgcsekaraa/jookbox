@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     recent_song_ids     VARCHAR,
     player_volume       DOUBLE DEFAULT 0.9,
     player_muted        BOOLEAN DEFAULT FALSE,
+    playback_speed      DOUBLE DEFAULT 1.0,
     repeat_mode         VARCHAR DEFAULT 'off',
     autoplay_next       BOOLEAN DEFAULT TRUE,
     updated_at          TIMESTAMPTZ
@@ -185,6 +186,7 @@ _MIGRATIONS = {
         "recent_song_ids": "VARCHAR",
         "player_volume": "DOUBLE DEFAULT 0.9",
         "player_muted": "BOOLEAN DEFAULT FALSE",
+        "playback_speed": "DOUBLE DEFAULT 1.0",
         "repeat_mode": "VARCHAR DEFAULT 'off'",
         "autoplay_next": "BOOLEAN DEFAULT TRUE",
         "updated_at": "TIMESTAMPTZ",

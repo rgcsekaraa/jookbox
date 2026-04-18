@@ -1382,9 +1382,13 @@ function App() {
       ...(payload || {}),
     };
     const nextThemePreference = ["system", "light", "dark"].includes(next.themePreference) ? next.themePreference : defaults.themePreference;
-    const allowedMainTabs = radioEnabled()
-      ? ["library", "recents", "favorites", "radio", "admin"]
-      : ["library", "recents", "favorites"];
+    const allowedMainTabs = ["library", "recents", "favorites"];
+    if (localMode()) {
+      allowedMainTabs.push("playlists");
+    }
+    if (radioEnabled()) {
+      allowedMainTabs.push("radio", "admin");
+    }
     const requestedMainTab = allowedMainTabs.includes(next.mainTab) ? next.mainTab : defaults.mainTab;
     const nextMainTab = !radioEnabled() && requestedMainTab === "radio" ? defaults.mainTab : requestedMainTab;
     const nextRepeatMode = ["off", "one", "album", "random"].includes(next.repeatMode) ? next.repeatMode : defaults.repeatMode;
@@ -3308,7 +3312,7 @@ function App() {
       if (event.key === "[") {
         event.preventDefault();
         if (!radioPlaybackLocked()) {
-          selectRelative(-1, true, selectedId() || currentTrackId(), { allowCrossfade: true });
+          selectRelative(-1, true, currentTrackId() || selectedId(), { allowCrossfade: true });
         }
         return;
       }
@@ -3316,7 +3320,7 @@ function App() {
       if (event.key === "]") {
         event.preventDefault();
         if (!radioPlaybackLocked()) {
-          selectRelative(1, true, selectedId() || currentTrackId(), { allowCrossfade: true });
+          selectRelative(1, true, currentTrackId() || selectedId(), { allowCrossfade: true });
         }
         return;
       }
@@ -3485,9 +3489,7 @@ function App() {
       mediaSession.setActionHandler("play", () => {
         if (!isPlaying()) {
           loadSong(selectedActiveSong() || selectedSong() || sortedActiveSongList()[0], true);
-          return;
         }
-        togglePlayback();
       });
       mediaSession.setActionHandler("pause", () => {
         if (isPlaying()) {

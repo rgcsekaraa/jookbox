@@ -1420,6 +1420,24 @@ def merge_preserved_user_state(source_path: Path, target_path: Path) -> None:
     conn = db.get_conn(str(target_path))
     try:
         conn.execute(f"ATTACH '{_duckdb_literal(source_path)}' AS previous (READ_ONLY)")
+        def copy_common_columns(table: str, where_clause: str = "") -> None:
+            target_columns = [
+                row[1]
+                for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+            ]
+            source_columns = {
+                row[1]
+                for row in conn.execute(f"PRAGMA table_info('previous.{table}')").fetchall()
+            }
+            shared_columns = [column for column in target_columns if column in source_columns]
+            if not shared_columns:
+                return
+            column_list = ", ".join(shared_columns)
+            sql = f"INSERT INTO {table} ({column_list}) SELECT {column_list} FROM previous.{table}"
+            if where_clause:
+                sql += f" WHERE {where_clause}"
+            conn.execute(sql)
+
         conn.execute("DELETE FROM user_sessions")
         conn.execute("DELETE FROM favorite_songs")
         conn.execute("DELETE FROM favorite_albums")
@@ -1427,13 +1445,29 @@ def merge_preserved_user_state(source_path: Path, target_path: Path) -> None:
         conn.execute("DELETE FROM favorite_music_directors")
         conn.execute("DELETE FROM user_preferences")
         conn.execute("DELETE FROM users")
-        conn.execute("INSERT INTO users SELECT * FROM previous.users")
-        conn.execute("INSERT INTO user_sessions SELECT * FROM previous.user_sessions")
-        conn.execute("INSERT INTO favorite_songs SELECT * FROM previous.favorite_songs")
-        conn.execute("INSERT INTO favorite_albums SELECT * FROM previous.favorite_albums")
-        conn.execute("INSERT INTO favorite_album_entities SELECT * FROM previous.favorite_album_entities")
-        conn.execute("INSERT INTO favorite_music_directors SELECT * FROM previous.favorite_music_directors")
-        conn.execute("INSERT INTO user_preferences SELECT * FROM previous.user_preferences")
+        copy_common_columns("users")
+        copy_common_columns("user_sessions")
+        copy_common_columns("favorite_songs")
+        copy_common_columns("favorite_albums")
+        copy_common_columns("favorite_album_entities")
+        copy_common_columns("favorite_music_directors")
+        previous_preference_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info('previous.user_preferences')").fetchall()
+        }
+        previous_playback_speed = "playback_speed" if "playback_speed" in previous_preference_columns else "1.0 AS playback_speed"
+        conn.execute(
+            f"""
+            INSERT INTO user_preferences (
+                user_id, theme_preference, main_tab, recent_song_ids,
+                player_volume, player_muted, playback_speed, repeat_mode, autoplay_next, updated_at
+            )
+            SELECT
+                user_id, theme_preference, main_tab, recent_song_ids,
+                player_volume, player_muted, {previous_playback_speed}, repeat_mode, autoplay_next, updated_at
+            FROM previous.user_preferences
+            """
+        )
         conn.execute(
             """
             DELETE FROM playlist_songs
@@ -1443,23 +1477,28 @@ def merge_preserved_user_state(source_path: Path, target_path: Path) -> None:
             """
         )
         conn.execute("DELETE FROM playlists WHERE COALESCE(is_global, FALSE) = FALSE")
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO playlists
-            SELECT *
-            FROM previous.playlists
-            WHERE COALESCE(is_global, FALSE) = FALSE
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO playlist_songs
-            SELECT ps.*
-            FROM previous.playlist_songs ps
-            JOIN previous.playlists p ON p.playlist_id = ps.playlist_id
-            WHERE COALESCE(p.is_global, FALSE) = FALSE
-            """
-        )
+        copy_common_columns("playlists", "COALESCE(is_global, FALSE) = FALSE")
+        playlist_song_columns = [
+            row[1]
+            for row in conn.execute("PRAGMA table_info('playlist_songs')").fetchall()
+        ]
+        previous_playlist_song_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info('previous.playlist_songs')").fetchall()
+        }
+        shared_playlist_song_columns = [column for column in playlist_song_columns if column in previous_playlist_song_columns]
+        if shared_playlist_song_columns:
+            column_list = ", ".join(shared_playlist_song_columns)
+            select_list = ", ".join(f"ps.{column}" for column in shared_playlist_song_columns)
+            conn.execute(
+                f"""
+                INSERT INTO playlist_songs ({column_list})
+                SELECT {select_list}
+                FROM previous.playlist_songs ps
+                JOIN previous.playlists p ON p.playlist_id = ps.playlist_id
+                WHERE COALESCE(p.is_global, FALSE) = FALSE
+                """
+            )
         conn.execute("DETACH previous")
     finally:
         conn.close()
@@ -1885,6 +1924,7 @@ def default_user_preferences() -> dict:
         "recentSongIds": [],
         "playerVolume": 0.9,
         "playerMuted": False,
+        "playbackSpeed": 1,
         "repeatMode": "off",
         "autoplayNext": True,
     }
@@ -1894,7 +1934,7 @@ def user_preferences_for_user(user_id: str) -> dict:
     with get_read_conn() as conn:
         row = conn.execute(
             """
-            SELECT theme_preference, main_tab, recent_song_ids, player_volume, player_muted, repeat_mode, autoplay_next
+            SELECT theme_preference, main_tab, recent_song_ids, player_volume, player_muted, playback_speed, repeat_mode, autoplay_next
             FROM user_preferences
             WHERE user_id = ?
             """,
@@ -1913,8 +1953,9 @@ def user_preferences_for_user(user_id: str) -> dict:
         "recentSongIds": normalized_recent_song_ids,
         "playerVolume": float(row[3]) if row[3] is not None else 0.9,
         "playerMuted": bool(row[4]),
-        "repeatMode": row[5] or "off",
-        "autoplayNext": True if row[6] is None else bool(row[6]),
+        "playbackSpeed": float(row[5]) if row[5] is not None else 1,
+        "repeatMode": row[6] or "off",
+        "autoplayNext": True if row[7] is None else bool(row[7]),
     }
 
 
@@ -1927,6 +1968,7 @@ def save_user_preferences(user_id: str, payload: dict) -> dict:
             "recentSongIds": payload.get("recentSongIds") if isinstance(payload.get("recentSongIds"), list) else prefs["recentSongIds"],
             "playerVolume": max(0.0, min(1.0, float(payload.get("playerVolume", prefs["playerVolume"])))),
             "playerMuted": bool(payload.get("playerMuted", prefs["playerMuted"])),
+            "playbackSpeed": float(payload.get("playbackSpeed", prefs["playbackSpeed"])),
             "repeatMode": payload.get("repeatMode") or prefs["repeatMode"],
             "autoplayNext": bool(payload.get("autoplayNext", prefs["autoplayNext"])),
         }
@@ -1934,12 +1976,16 @@ def save_user_preferences(user_id: str, payload: dict) -> dict:
     if prefs["themePreference"] not in {"system", "light", "dark"}:
         prefs["themePreference"] = "system"
     allowed_main_tabs = {"library", "recents", "favorites"}
-    if not LOCAL_MODE:
+    if LOCAL_MODE:
+        allowed_main_tabs.add("playlists")
+    else:
         allowed_main_tabs.update({"radio", "admin"})
     if prefs["mainTab"] not in allowed_main_tabs:
         prefs["mainTab"] = "library"
     if prefs["repeatMode"] not in {"off", "one", "album", "random"}:
         prefs["repeatMode"] = "off"
+    if prefs["playbackSpeed"] not in {1, 1.25, 1.5, 2}:
+        prefs["playbackSpeed"] = 1
     prefs["recentSongIds"] = [song_id for song_id in prefs["recentSongIds"] if isinstance(song_id, str) and song_id][:20]
 
     with db.get_conn() as conn:
@@ -1947,15 +1993,16 @@ def save_user_preferences(user_id: str, payload: dict) -> dict:
             """
             INSERT INTO user_preferences (
                 user_id, theme_preference, main_tab, recent_song_ids,
-                player_volume, player_muted, repeat_mode, autoplay_next, updated_at
+                player_volume, player_muted, playback_speed, repeat_mode, autoplay_next, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id) DO UPDATE SET
                 theme_preference = excluded.theme_preference,
                 main_tab = excluded.main_tab,
                 recent_song_ids = excluded.recent_song_ids,
                 player_volume = excluded.player_volume,
                 player_muted = excluded.player_muted,
+                playback_speed = excluded.playback_speed,
                 repeat_mode = excluded.repeat_mode,
                 autoplay_next = excluded.autoplay_next,
                 updated_at = excluded.updated_at
@@ -1967,6 +2014,7 @@ def save_user_preferences(user_id: str, payload: dict) -> dict:
                 json.dumps(prefs["recentSongIds"]),
                 prefs["playerVolume"],
                 prefs["playerMuted"],
+                prefs["playbackSpeed"],
                 prefs["repeatMode"],
                 prefs["autoplayNext"],
                 now_utc(),
