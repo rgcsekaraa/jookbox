@@ -71,6 +71,38 @@ def display_music_director_name(value: str) -> str:
     return overrides.get(value, value)
 
 
+BGM_ALBUM_SQL_RE = r"(?i)\bbgm\b"
+
+
+def playlist_eligible_song_sql(alias: str = "songs") -> str:
+    prefix = f"{alias}." if alias else ""
+    return f"NOT regexp_matches(COALESCE({prefix}movie_name, ''), '{BGM_ALBUM_SQL_RE}')"
+
+
+def remove_bgm_album_tracks_from_playlists(conn: duckdb.DuckDBPyConnection) -> int:
+    bgm_song_ids = [
+        row[0]
+        for row in conn.execute(
+            f"""
+            SELECT song_id
+            FROM songs
+            WHERE NOT {playlist_eligible_song_sql('')}
+            """
+        ).fetchall()
+        if row[0]
+    ]
+    if not bgm_song_ids:
+        return 0
+    placeholders = ", ".join("?" for _ in bgm_song_ids)
+    removed = conn.execute(
+        f"DELETE FROM playlist_songs WHERE song_id IN ({placeholders}) RETURNING song_id",
+        bgm_song_ids,
+    ).fetchall()
+    if removed:
+        print(f"  Removed {len(removed):,} BGM-album playlist entries")
+    return len(removed)
+
+
 LEGACY_MUSIC_DIRECTOR_SHORTLISTS = {
     "A.R.Rahman": ["A.R. Rahman Hits"],
     "Anirudh Ravichander": ["Anirudh Ravichander Chartbusters"],
@@ -125,10 +157,11 @@ def ensure_top_music_director_playlists(path: Path, limit: int = 12) -> None:
     try:
         now = iso_now()
         directors = conn.execute(
-            """
+            f"""
             SELECT music_director, COUNT(DISTINCT album_url) AS album_count, COUNT(*) AS song_count
             FROM songs
             WHERE COALESCE(TRIM(music_director), '') <> ''
+              AND {playlist_eligible_song_sql('songs')}
             GROUP BY music_director
             ORDER BY album_count DESC, song_count DESC, music_director
             LIMIT ?
@@ -157,10 +190,11 @@ def ensure_top_music_director_playlists(path: Path, limit: int = 12) -> None:
                 [playlist_id, playlist_name, source_url, now, now],
             )
             song_rows = conn.execute(
-                """
+                f"""
                 SELECT song_id
                 FROM songs
                 WHERE music_director = ?
+                  AND {playlist_eligible_song_sql('songs')}
                 ORDER BY
                     TRY_CAST(year AS INTEGER) DESC NULLS LAST,
                     updated_at DESC NULLS LAST,
@@ -329,6 +363,12 @@ def export_library_snapshot(source_db: Path, output_db: Path) -> None:
 
     print("✓ Ensuring top music-director global playlists")
     ensure_top_music_director_playlists(output_db)
+    conn = db.get_conn(str(output_db))
+    try:
+        print("✓ Removing BGM-album tracks from playlists")
+        remove_bgm_album_tracks_from_playlists(conn)
+    finally:
+        conn.close()
 
 
 def build_manifest(stats_db: Path, download_path: Path, repo: str, ref: str, version: str) -> dict[str, object]:

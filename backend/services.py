@@ -360,6 +360,34 @@ def normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+BGM_ALBUM_SQL_RE = r"(?i)\bbgm\b"
+
+
+def playlist_eligible_song_sql(alias: str = "s") -> str:
+    prefix = f"{alias}." if alias else ""
+    return f"NOT regexp_matches(COALESCE({prefix}movie_name, ''), '{BGM_ALBUM_SQL_RE}')"
+
+
+def playlist_eligible_song_ids(conn: duckdb.DuckDBPyConnection, song_ids: list[str]) -> list[str]:
+    cleaned_ids = [song_id for song_id in song_ids if isinstance(song_id, str) and song_id]
+    if not cleaned_ids:
+        return []
+    placeholders = ", ".join("?" for _ in cleaned_ids)
+    rows = conn.execute(
+        f"""
+        SELECT song_id
+        FROM songs
+        WHERE song_id IN ({placeholders})
+          AND url_320kbps IS NOT NULL
+          AND url_320kbps != ''
+          AND {playlist_eligible_song_sql('')}
+        """,
+        cleaned_ids,
+    ).fetchall()
+    eligible_ids = {row[0] for row in rows if row[0]}
+    return [song_id for song_id in cleaned_ids if song_id in eligible_ids]
+
+
 def split_people(value: str) -> list[str]:
     if not value:
         return []
@@ -377,10 +405,12 @@ def parse_year_value(value: str | None) -> int | None:
 def get_radio_library_rows() -> list[dict]:
     with get_read_conn() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT song_id, movie_name, track_name, singers, music_director, year, updated_at
             FROM songs
-            WHERE url_320kbps IS NOT NULL AND url_320kbps != ''
+            WHERE url_320kbps IS NOT NULL
+              AND url_320kbps != ''
+              AND {playlist_eligible_song_sql('')}
             ORDER BY TRY_CAST(year AS INTEGER) DESC NULLS LAST, movie_name, track_name
             """
         ).fetchall()
@@ -409,10 +439,12 @@ def get_radio_library_rows() -> list[dict]:
 def get_radio_library_signature() -> str:
     with get_read_conn() as conn:
         row = conn.execute(
-            """
+            f"""
             SELECT COUNT(*), MAX(updated_at)
             FROM songs
-            WHERE url_320kbps IS NOT NULL AND url_320kbps != ''
+            WHERE url_320kbps IS NOT NULL
+              AND url_320kbps != ''
+              AND {playlist_eligible_song_sql('')}
             """
         ).fetchone()
     return f"{row[0] or 0}:{row[1].isoformat() if row and row[1] else ''}"
@@ -1045,11 +1077,10 @@ def create_or_update_global_playlist(
     source: str,
     source_url: str,
 ) -> dict:
-    cleaned_song_ids = [song_id for song_id in song_ids if isinstance(song_id, str) and song_id]
-    if not cleaned_song_ids:
-        raise ValueError("No songs available for playlist")
-
     with db.get_conn() as conn:
+        cleaned_song_ids = playlist_eligible_song_ids(conn, song_ids)
+        if not cleaned_song_ids:
+            raise ValueError("No eligible songs available for playlist")
         existing = conn.execute(
             """
             SELECT playlist_id
@@ -1121,10 +1152,13 @@ def normalize_spotify_playlist_url(playlist_url: str) -> str:
 def ensure_default_latest_2026_playlist() -> dict | None:
     with get_read_conn() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT song_id
             FROM songs
-            WHERE year = '2026' AND url_320kbps IS NOT NULL AND url_320kbps != ''
+            WHERE year = '2026'
+              AND url_320kbps IS NOT NULL
+              AND url_320kbps != ''
+              AND {playlist_eligible_song_sql('')}
             ORDER BY updated_at DESC NULLS LAST, movie_name, track_number
             LIMIT 50
             """
@@ -1201,14 +1235,15 @@ def create_global_playlist_from_radio_station(owner_user_id: str, station_id: st
             conn.execute("UPDATE playlists SET user_id = ?, name = ?, source = 'radio', source_url = ?, updated_at = ? WHERE playlist_id = ?",
                          [owner_user_id, playlist_name, f"isaibox:radio:{station['id']}", now_utc(), target_playlist_id])
             conn.execute("DELETE FROM playlist_songs WHERE playlist_id = ?", [target_playlist_id])
+            eligible_song_ids = playlist_eligible_song_ids(conn, station.get("songIds", []))
             conn.executemany(
                 "INSERT INTO playlist_songs (playlist_id, song_id, position, added_at) VALUES (?, ?, ?, ?)",
-                [[target_playlist_id, song_id, index + 1, now_utc()] for index, song_id in enumerate(station.get("songIds", []))],
+                [[target_playlist_id, song_id, index + 1, now_utc()] for index, song_id in enumerate(eligible_song_ids)],
             )
         playlist = {
             "id": target_playlist_id,
             "name": playlist_name,
-            "trackCount": len(station.get("songIds", [])),
+            "trackCount": len(eligible_song_ids),
             "source": "radio",
             "sourceUrl": f"isaibox:radio:{station['id']}",
             "isGlobal": True,
@@ -1224,14 +1259,15 @@ def create_global_playlist_from_radio_station(owner_user_id: str, station_id: st
                 """,
                 [playlist_id, owner_user_id, playlist_name, f"isaibox:radio:{station['id']}:{playlist_id}", now_utc(), now_utc()],
             )
+            eligible_song_ids = playlist_eligible_song_ids(conn, station.get("songIds", []))
             conn.executemany(
                 "INSERT INTO playlist_songs (playlist_id, song_id, position, added_at) VALUES (?, ?, ?, ?)",
-                [[playlist_id, song_id, index + 1, now_utc()] for index, song_id in enumerate(station.get("songIds", []))],
+                [[playlist_id, song_id, index + 1, now_utc()] for index, song_id in enumerate(eligible_song_ids)],
             )
         playlist = {
             "id": playlist_id,
             "name": playlist_name,
-            "trackCount": len(station.get("songIds", [])),
+            "trackCount": len(eligible_song_ids),
             "source": "radio",
             "sourceUrl": f"isaibox:radio:{station['id']}:{playlist_id}",
             "isGlobal": True,
@@ -1256,10 +1292,12 @@ def get_library_match_cache() -> list[dict]:
             return library_match_cache
         with get_read_conn() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT song_id, track_name, singers, movie_name, music_director
                 FROM songs
-                WHERE url_320kbps IS NOT NULL AND url_320kbps != ''
+                WHERE url_320kbps IS NOT NULL
+                  AND url_320kbps != ''
+                  AND {playlist_eligible_song_sql('')}
                 """
             ).fetchall()
         library_match_cache.extend(
@@ -1499,6 +1537,16 @@ def merge_preserved_user_state(source_path: Path, target_path: Path) -> None:
                 WHERE COALESCE(p.is_global, FALSE) = FALSE
                 """
             )
+        conn.execute(
+            f"""
+            DELETE FROM playlist_songs
+            WHERE song_id IN (
+                SELECT song_id
+                FROM songs
+                WHERE NOT {playlist_eligible_song_sql('')}
+            )
+            """
+        )
         conn.execute("DETACH previous")
     finally:
         conn.close()
@@ -1961,14 +2009,22 @@ def user_preferences_for_user(user_id: str) -> dict:
 
 def save_user_preferences(user_id: str, payload: dict) -> dict:
     prefs = default_user_preferences()
+    try:
+        next_player_volume = max(0.0, min(1.0, float(payload.get("playerVolume", prefs["playerVolume"]))))
+    except (TypeError, ValueError):
+        next_player_volume = prefs["playerVolume"]
+    try:
+        next_playback_speed = float(payload.get("playbackSpeed", prefs["playbackSpeed"]))
+    except (TypeError, ValueError):
+        next_playback_speed = prefs["playbackSpeed"]
     prefs.update(
         {
             "themePreference": payload.get("themePreference") or prefs["themePreference"],
             "mainTab": payload.get("mainTab") or prefs["mainTab"],
             "recentSongIds": payload.get("recentSongIds") if isinstance(payload.get("recentSongIds"), list) else prefs["recentSongIds"],
-            "playerVolume": max(0.0, min(1.0, float(payload.get("playerVolume", prefs["playerVolume"])))),
+            "playerVolume": next_player_volume,
             "playerMuted": bool(payload.get("playerMuted", prefs["playerMuted"])),
-            "playbackSpeed": float(payload.get("playbackSpeed", prefs["playbackSpeed"])),
+            "playbackSpeed": next_playback_speed,
             "repeatMode": payload.get("repeatMode") or prefs["repeatMode"],
             "autoplayNext": bool(payload.get("autoplayNext", prefs["autoplayNext"])),
         }
@@ -2026,10 +2082,11 @@ def save_user_preferences(user_id: str, payload: dict) -> dict:
 def playlists_for_user(user_id: str) -> list[dict]:
     with get_read_conn() as conn:
         rows = conn.execute(
-            """
-            SELECT p.playlist_id, p.name, p.is_global, p.source, p.source_url, p.updated_at, p.created_at, COUNT(ps.song_id) AS track_count
+            f"""
+            SELECT p.playlist_id, p.name, p.is_global, p.source, p.source_url, p.updated_at, p.created_at, COUNT(s.song_id) AS track_count
             FROM playlists p
             LEFT JOIN playlist_songs ps ON ps.playlist_id = p.playlist_id
+            LEFT JOIN songs s ON s.song_id = ps.song_id AND {playlist_eligible_song_sql('s')}
             WHERE p.user_id = ? AND p.is_global = FALSE
             GROUP BY 1,2,3,4,5,6,7
             ORDER BY p.updated_at DESC, p.created_at DESC
@@ -2054,10 +2111,11 @@ def global_playlists() -> list[dict]:
     ensure_default_latest_2026_playlist()
     with get_read_conn() as conn:
         rows = conn.execute(
-            """
-            SELECT p.playlist_id, p.name, p.source, p.source_url, p.updated_at, p.created_at, COUNT(ps.song_id) AS track_count
+            f"""
+            SELECT p.playlist_id, p.name, p.source, p.source_url, p.updated_at, p.created_at, COUNT(s.song_id) AS track_count
             FROM playlists p
             LEFT JOIN playlist_songs ps ON ps.playlist_id = p.playlist_id
+            LEFT JOIN songs s ON s.song_id = ps.song_id AND {playlist_eligible_song_sql('s')}
             WHERE p.is_global = TRUE
             GROUP BY 1,2,3,4,5,6
             ORDER BY
@@ -2117,7 +2175,7 @@ def song_payload_from_row(row) -> dict:
 def random_500_playlist_detail() -> dict:
     with get_read_conn() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT
                 song_id,
                 movie_name,
@@ -2134,6 +2192,7 @@ def random_500_playlist_detail() -> dict:
               AND url_320kbps != ''
               AND album_url IS NOT NULL
               AND album_url != ''
+              AND {playlist_eligible_song_sql('')}
               AND TRY_CAST(year AS INTEGER) BETWEEN ? AND ?
             ORDER BY updated_at DESC NULLS LAST, movie_name, track_number
             """
@@ -2257,8 +2316,9 @@ def playlist_tracks(playlist_id: str) -> list[dict]:
         song_ids = [row[2] for row in playlist_rows if row[2]]
         if not song_ids:
             return []
+        placeholders = ", ".join(["?"] * len(song_ids))
         song_rows = conn.execute(
-            """
+            f"""
             SELECT
                 song_id,
                 movie_name,
@@ -2274,7 +2334,8 @@ def playlist_tracks(playlist_id: str) -> list[dict]:
             WHERE song_id IN ({placeholders})
               AND url_320kbps IS NOT NULL
               AND url_320kbps != ''
-            """.format(placeholders=", ".join(["?"] * len(song_ids))),
+              AND {playlist_eligible_song_sql('')}
+            """,
             song_ids,
         ).fetchall()
 

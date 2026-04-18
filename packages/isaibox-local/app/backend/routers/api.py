@@ -665,10 +665,13 @@ def add_song_to_playlist(playlist_id: str):
         return json_response({"ok": False, "message": "songId is required"}), 400
     with db.get_conn() as conn:
         song = conn.execute(
-            """
+            f"""
             SELECT song_id
             FROM songs
-            WHERE song_id = ? AND url_320kbps IS NOT NULL AND url_320kbps != ''
+            WHERE song_id = ?
+              AND url_320kbps IS NOT NULL
+              AND url_320kbps != ''
+              AND {playlist_eligible_song_sql('')}
             LIMIT 1
             """,
             [song_id],

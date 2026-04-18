@@ -926,7 +926,16 @@ function App() {
     const filteredByDirector = musicDirectorFilter()
       ? filteredByArtist.filter((song) => normalizeText(song.musicDirector) === normalizeText(musicDirectorFilter()))
       : filteredByArtist;
-    return filteredByDirector;
+    if (!normalizedQuery) {
+      return filteredByDirector;
+    }
+    return filteredByDirector.filter((song) => [
+      song.track,
+      song.movie,
+      song.musicDirector,
+      song.singers,
+      song.year,
+    ].some((value) => matchesNormalizedField(value, normalizedQuery)));
   });
   const visibleAlbums = createMemo(() => {
     const normalizedQuery = normalizeText(query());
@@ -1198,11 +1207,6 @@ function App() {
   const selectedIndex = createMemo(() => sortedActiveSongList().findIndex((song) => song.id === selectedId()));
   const favoriteIdSet = createMemo(() => new Set(favoriteIds()));
   const loadingDots = createMemo(() => ".".repeat((loadingFrame() % 3) + 1));
-  const libraryPlaylistCards = createMemo(() => [
-    ...playlists().map((playlist) => ({ ...playlist, section: "Yours" })),
-    ...globalPlaylists().map((playlist) => ({ ...playlist, section: "Global" })),
-  ]);
-
   const pushLibraryNavState = () => {
     const playlistDetail = globalPlaylistDetail();
     setLibraryNavStack((current) => [
@@ -5560,30 +5564,6 @@ function App() {
                             <div class="mt-2 text-lg font-semibold">Your music, built for touch.</div>
                             <div class="mt-2 text-sm text-[var(--soft)]">
                               {visibleResults().length} songs ready. Pick a lane, jump between playlists, and keep playback controls close.
-                            </div>
-                          </div>
-                        </Show>
-                        <Show when={!visiblePlaylistDetail() && !movieFilter() && !artistFilter() && !musicDirectorFilter() && libraryPlaylistCards().length > 0}>
-                          <div class="mt-4">
-                            <div class="mb-2 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--faint)]">Playlists</div>
-                            <div class="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                              <For each={libraryPlaylistCards()}>
-                                {(playlist) => (
-                                  <button
-                                    type="button"
-                                    onClick={() => void openGlobalPlaylist(playlist.id)}
-                                    class={`min-w-[160px] rounded-[18px] border px-4 py-3 text-left transition ${
-                                      selectedGlobalPlaylistTarget() === playlist.id
-                                        ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)]"
-                                        : "border-[var(--line)] bg-[var(--hover)] text-[var(--fg)]"
-                                    }`}
-                                  >
-                                    <div class="font-mono text-[10px] uppercase tracking-[0.18em] opacity-70">{playlist.section}</div>
-                                    <div class="mt-2 line-clamp-2 text-sm font-semibold">{playlist.name}</div>
-                                    <div class="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] opacity-70">{playlist.trackCount} tracks</div>
-                                  </button>
-                                )}
-                              </For>
                             </div>
                           </div>
                         </Show>
