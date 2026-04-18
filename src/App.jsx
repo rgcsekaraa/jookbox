@@ -572,6 +572,7 @@ function App() {
   const [loadingFrame, setLoadingFrame] = createSignal(0);
   const [pendingRadioOffset, setPendingRadioOffset] = createSignal(null);
   const [pendingPlaylistSongId, setPendingPlaylistSongId] = createSignal("");
+  const [pendingScrollSongId, setPendingScrollSongId] = createSignal("");
   const [appOffline, setAppOffline] = createSignal(false);
   const [offlineMessage, setOfflineMessage] = createSignal("");
   const [cacheStatus, setCacheStatus] = createSignal(null);
@@ -1273,6 +1274,7 @@ function App() {
         albumFilterMeta: albumFilterMeta(),
         artistFilter: artistFilter(),
         musicDirectorFilter: musicDirectorFilter(),
+        selectedId: selectedId(),
         selectedGlobalPlaylistTarget: selectedGlobalPlaylistTarget(),
         globalPlaylistDetail: playlistDetail
           ? {
@@ -1346,6 +1348,15 @@ function App() {
     setGlobalPlaylistNameEdit(previous.globalPlaylistDetail?.name || "");
     setPlaylistDetailError("");
     setPlaylistDetailLoading(false);
+    const previousTracks = previous.globalPlaylistDetail?.tracks || [];
+    const currentPlayingId = currentTrackId();
+    const targetSongId = previousTracks.some((song) => song.id === currentPlayingId)
+      ? currentPlayingId
+      : (previous.selectedId || selectedId());
+    if (targetSongId) {
+      setSelectedId(targetSongId);
+      setPendingScrollSongId(targetSongId);
+    }
     if (previous.globalPlaylistDetail?.id) {
       setPlaylistDetailCache((current) => {
         const next = new Map(current);
@@ -3879,19 +3890,24 @@ function App() {
     primeSongAudio(song);
   });
 
-  createEffect(() => {
-    const currentId = selectedId();
-    if (!currentId || !listRef) {
-      return;
+  const scrollSongRowIntoView = (songId, options = {}) => {
+    if (!songId || !listRef) {
+      return false;
     }
-    const row = rowRefs.get(currentId);
+    const row = rowRefs.get(songId);
     if (!row) {
-      return;
+      return false;
     }
     const listRect = listRef.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
     const topPadding = 12;
     const bottomPadding = 12;
+
+    if (options.center) {
+      const nextScrollTop = listRef.scrollTop + (rowRect.top - listRect.top) - ((listRect.height - rowRect.height) / 2);
+      animateListScroll(Math.max(0, nextScrollTop));
+      return true;
+    }
 
     if (rowRect.top < listRect.top + topPadding || rowRect.bottom > listRect.bottom - bottomPadding) {
       const nextScrollTop = rowRect.top < listRect.top + topPadding
@@ -3899,6 +3915,30 @@ function App() {
         : listRef.scrollTop + (rowRect.bottom - (listRect.bottom - bottomPadding));
       animateListScroll(Math.max(0, nextScrollTop));
     }
+    return true;
+  };
+
+  createEffect(() => {
+    const currentId = selectedId();
+    if (!currentId) {
+      return;
+    }
+    scrollSongRowIntoView(currentId);
+  });
+
+  createEffect(() => {
+    const targetId = pendingScrollSongId();
+    if (!targetId) {
+      return;
+    }
+    sortedActiveSongList();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (scrollSongRowIntoView(targetId, { center: true })) {
+          setPendingScrollSongId("");
+        }
+      });
+    });
   });
 
   createEffect(() => {
