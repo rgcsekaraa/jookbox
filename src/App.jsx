@@ -1790,6 +1790,15 @@ function App() {
     resetAudioDeck(inactive);
   };
 
+  const forceStopInactiveDecks = (activeAudio) => {
+    stopCrossfade();
+    audioRefs.forEach((audio) => {
+      if (audio && audio !== activeAudio) {
+        resetAudioDeck(audio);
+      }
+    });
+  };
+
   const playPrimaryDeck = (audio, song, relativeUrl, requestToken = playbackRequestToken) => {
     if (!audio || !song || !relativeUrl) {
       return Promise.reject(new Error("Primary deck unavailable"));
@@ -2958,7 +2967,7 @@ function App() {
   };
 
   const loadSong = (song, autoplay = false, options = {}) => {
-    const { allowCrossfade = false } = options;
+    const { allowCrossfade = false, forceImmediate = false } = options;
     const activeAudio = getActiveAudio();
     const inactiveAudio = getInactiveAudio();
     if (!song || !activeAudio || !inactiveAudio) {
@@ -2978,6 +2987,7 @@ function App() {
     const nextRelativeUrl = `${song.audioUrl}?v=${version}`;
     const nextUrl = new URL(nextRelativeUrl, window.location.origin).href;
     const canCrossfade = Boolean(
+      !forceImmediate &&
       allowCrossfade &&
       autoplay &&
       activeAudio.src &&
@@ -2986,7 +2996,11 @@ function App() {
       previousTrackId !== song.id
     );
     if (activeAudio.src !== nextUrl) {
-      stopCrossfade();
+      if (forceImmediate) {
+        forceStopInactiveDecks(activeAudio);
+      } else {
+        stopCrossfade();
+      }
       setCurrentTime(0);
       setDuration(0);
       setStreamStarted(false);
@@ -3054,9 +3068,15 @@ function App() {
               return;
             }
             if (canCrossfade) {
-              setIsPlaying(!activeAudio.paused);
-              setStreamStarted(!activeAudio.paused);
-              syncTimelineFromAudio(activeAudio);
+              if (isCurrentPlaybackRequest(requestToken, song.id)) {
+                void playPrimaryDeck(activeAudio, song, nextRelativeUrl, requestToken)
+                  .catch(() => {
+                    if (isCurrentPlaybackRequest(requestToken, song.id)) {
+                      setIsPlaying(false);
+                      setStreamStarted(false);
+                    }
+                  });
+              }
               return;
             }
             void playPrimaryDeck(activeAudio, song, nextRelativeUrl, requestToken)
@@ -3492,7 +3512,7 @@ function App() {
       if (event.key === "[") {
         event.preventDefault();
         if (!radioPlaybackLocked()) {
-          selectRelative(-1, true, currentTrackId() || selectedId(), { allowCrossfade: true });
+          selectRelative(-1, true, currentTrackId() || selectedId(), { forceImmediate: true });
         }
         return;
       }
@@ -3500,7 +3520,7 @@ function App() {
       if (event.key === "]") {
         event.preventDefault();
         if (!radioPlaybackLocked()) {
-          playNextFromQueueOrRelative({ allowCrossfade: true });
+          playNextFromQueueOrRelative({ forceImmediate: true });
         }
         return;
       }
@@ -6371,7 +6391,7 @@ function App() {
               <div class="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => void selectRelative(-1, true, currentTrackId() || selectedId(), { allowCrossfade: true })}
+                  onClick={() => void selectRelative(-1, true, currentTrackId() || selectedId(), { forceImmediate: true })}
                   disabled={radioPlaybackLocked()}
                   aria-label="Previous"
                   class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] disabled:opacity-40"
@@ -6388,7 +6408,7 @@ function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void playNextFromQueueOrRelative({ allowCrossfade: true })}
+                  onClick={() => void playNextFromQueueOrRelative({ forceImmediate: true })}
                   disabled={radioPlaybackLocked()}
                   aria-label="Next"
                   class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] disabled:opacity-40"
@@ -6523,7 +6543,7 @@ function App() {
             </Show>
           </div>
           <div class="flex items-center justify-center gap-5">
-            <IconButton disabled={radioPlaybackLocked()} onClick={() => selectRelative(-1, true, currentTrackId() || selectedId(), { allowCrossfade: true })} label="Previous">
+            <IconButton disabled={radioPlaybackLocked()} onClick={() => selectRelative(-1, true, currentTrackId() || selectedId(), { forceImmediate: true })} label="Previous">
               <PrevIcon />
             </IconButton>
             <button
@@ -6534,7 +6554,7 @@ function App() {
             >
               {isPlaying() ? (streamStarted() ? <PauseIcon /> : <LoadingSpinnerIcon />) : <PlayIcon />}
             </button>
-            <IconButton disabled={radioPlaybackLocked()} onClick={() => playNextFromQueueOrRelative({ allowCrossfade: true })} label="Next">
+            <IconButton disabled={radioPlaybackLocked()} onClick={() => playNextFromQueueOrRelative({ forceImmediate: true })} label="Next">
               <NextIcon />
             </IconButton>
             <IconButton
@@ -6669,7 +6689,7 @@ function App() {
               <div class="mt-6 flex items-center justify-center gap-4">
                 <button
                   type="button"
-                  onClick={() => selectRelative(-1, true, currentTrackId() || selectedId(), { allowCrossfade: true })}
+                  onClick={() => selectRelative(-1, true, currentTrackId() || selectedId(), { forceImmediate: true })}
                   disabled={radioPlaybackLocked()}
                   aria-label="Previous"
                   class="flex h-12 w-12 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] disabled:opacity-40"
@@ -6686,7 +6706,7 @@ function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => playNextFromQueueOrRelative({ allowCrossfade: true })}
+                  onClick={() => playNextFromQueueOrRelative({ forceImmediate: true })}
                   disabled={radioPlaybackLocked()}
                   aria-label="Next"
                   class="flex h-12 w-12 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] disabled:opacity-40"
