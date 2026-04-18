@@ -1384,7 +1384,6 @@ function App() {
     }
     navigateToMovie({ album: song.movie, albumUrl: song.albumUrl, year: song.year });
     setShowMobilePlayerPanel(false);
-    setShowMobileVolumeSlider(false);
   };
   const playlistSummaryById = createMemo(() => {
     const map = new Map();
@@ -3894,7 +3893,6 @@ function App() {
   createEffect(() => {
     if (!showMobilePlayerPanel()) {
       setMobilePlayerDragOffset(0);
-      setShowMobileVolumeSlider(false);
       mobilePlayerTouchStartY = null;
     }
   });
@@ -6357,7 +6355,7 @@ function App() {
         </Show>
       </section>
 
-      <footer class="border-t border-[var(--line)] bg-[var(--bg)] px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-6">
+      <footer class="relative z-30 border-t border-[var(--line)] bg-[var(--bg)] px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-6">
         <Show when={currentTrackId()}>
         <div class="md:hidden">
           <div class="rounded-[22px] border border-[var(--line)] bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] px-3 py-3 shadow-[0_-12px_40px_rgba(0,0,0,0.25)]">
@@ -6720,7 +6718,6 @@ function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setShowMobileVolumeSlider(false);
                       void toggleFavorite(currentSong().id);
                     }}
                     aria-label={favoriteIdSet().has(currentSong()?.id) ? "Remove favorite" : "Add favorite"}
@@ -6735,7 +6732,6 @@ function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setShowMobileVolumeSlider(false);
                       void saveCurrentToPlaylist();
                     }}
                     aria-label="Add to playlist"
@@ -6748,7 +6744,6 @@ function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setShowMobileVolumeSlider(false);
                       addCurrentSongToQueue();
                     }}
                     aria-label={queuedSongIds().has(currentSong()?.id) ? "Already in queue" : "Add to queue"}
@@ -6764,7 +6759,6 @@ function App() {
                 <button
                   type="button"
                   onClick={() => {
-                    setShowMobileVolumeSlider(false);
                     cyclePlaybackMode();
                   }}
                   disabled={radioPlaybackLocked()}
@@ -6780,7 +6774,6 @@ function App() {
                 <button
                   type="button"
                   onClick={() => {
-                    setShowMobileVolumeSlider(false);
                     cyclePlaybackSpeed();
                   }}
                   aria-label={`Playback speed: ${formatPlaybackSpeed(playbackSpeed())}`}
