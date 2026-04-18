@@ -509,6 +509,7 @@ function App() {
   const activeTheme = createMemo(() => (themePreference() === "system" ? systemTheme() : themePreference()));
   const [recentIds, setRecentIds] = createSignal([]);
   const [playQueue, setPlayQueue] = createSignal([]);
+  const [playbackContext, setPlaybackContext] = createSignal({ source: "library", songIds: [] });
   const [radioQueue, setRadioQueue] = createSignal([]);
   const [radioStations, setRadioStations] = createSignal([]);
   const [selectedRadioStationId, setSelectedRadioStationId] = createSignal("");
@@ -566,6 +567,7 @@ function App() {
   const [showMobileVolumeSlider, setShowMobileVolumeSlider] = createSignal(false);
   const [showMobilePlaylistPicker, setShowMobilePlaylistPicker] = createSignal(false);
   const [mobilePlaylistSection, setMobilePlaylistSection] = createSignal("global");
+  const [playlistBrowseSection, setPlaylistBrowseSection] = createSignal("global");
   const [mobilePlayerDragOffset, setMobilePlayerDragOffset] = createSignal(0);
   const [loadingFrame, setLoadingFrame] = createSignal(0);
   const [pendingRadioOffset, setPendingRadioOffset] = createSignal(null);
@@ -1254,6 +1256,7 @@ function App() {
       null
     );
   });
+  const playbackContextSongs = createMemo(() => playbackContext().songIds.map((id) => songIndex().get(id)).filter(Boolean));
   const selectedActiveSong = createMemo(() => sortedActiveSongList().find((song) => song.id === selectedId()) || null);
   const selectedIndex = createMemo(() => sortedActiveSongList().findIndex((song) => song.id === selectedId()));
   const favoriteIdSet = createMemo(() => new Set(favoriteIds()));
@@ -2921,6 +2924,28 @@ function App() {
     return <RepeatIcon />;
   });
 
+  const setPlaybackContextForSong = (song, options = {}) => {
+    if (!song?.id || options.preservePlaybackContext) {
+      return;
+    }
+    const providedIds = Array.isArray(options.playbackContextIds) ? options.playbackContextIds : [];
+    const visibleIds = sortedActiveSongList().map((item) => item.id).filter(Boolean);
+    const sourceIds = providedIds.length ? providedIds : visibleIds;
+    const nextIds = [];
+    for (const id of sourceIds) {
+      if (id && !nextIds.includes(id)) {
+        nextIds.push(id);
+      }
+    }
+    if (!nextIds.includes(song.id)) {
+      nextIds.unshift(song.id);
+    }
+    setPlaybackContext({
+      source: options.playbackContextSource || mainTab(),
+      songIds: nextIds,
+    });
+  };
+
   const loadSong = (song, autoplay = false, options = {}) => {
     const { allowCrossfade = false } = options;
     const activeAudio = getActiveAudio();
@@ -2934,6 +2959,7 @@ function App() {
     const isSameSong = previousTrackId === song.id;
     setSelectedId(song.id);
     setCurrentTrackId(song.id);
+    setPlaybackContextForSong(song, options);
     rememberRecentSong(song.id);
     prefetchSongIds(getSongNeighborhoodIds(song));
 
@@ -3124,7 +3150,7 @@ function App() {
       const song = songIndex().get(id);
       if (song) {
         setPlayQueue((current) => current.filter((queuedId) => queuedId !== id));
-        return song;
+        return { song, contextIds: ids };
       }
     }
     if (ids.length) {
@@ -3137,15 +3163,29 @@ function App() {
     if (!song?.id) {
       return;
     }
+    const contextIds = playQueue().includes(song.id) ? playQueue() : [song.id, ...playQueue()];
     removeSongFromQueue(song.id);
-    loadSong(song, true, options);
+    loadSong(song, true, {
+      ...options,
+      playbackContextSource: "queue",
+      playbackContextIds: contextIds,
+    });
+  };
+
+  const queuePlaybackContextIds = (fallbackIds = []) => {
+    const context = playbackContext();
+    return context.source === "queue" && context.songIds.length ? context.songIds : fallbackIds;
   };
 
   const playNextFromQueueOrRelative = (options = {}) => {
     if (!radioPlaybackLocked()) {
-      const queuedSong = takeNextQueuedSong();
-      if (queuedSong) {
-        loadSong(queuedSong, true, options);
+      const queued = takeNextQueuedSong();
+      if (queued?.song) {
+        loadSong(queued.song, true, {
+          ...options,
+          playbackContextSource: "queue",
+          playbackContextIds: queuePlaybackContextIds(queued.contextIds),
+        });
         return true;
       }
     }
@@ -3162,8 +3202,9 @@ function App() {
   };
 
   const pickRelativeSong = (offset, baseId = selectedId(), options = {}) => {
-    const { respectRandom = true } = options;
-    const list = sortedActiveSongList();
+    const { respectRandom = true, usePlaybackContext = false } = options;
+    const contextSongs = playbackContextSongs();
+    const list = usePlaybackContext && contextSongs.length ? contextSongs : sortedActiveSongList();
     if (!list.length) {
       return null;
     }
@@ -3191,12 +3232,15 @@ function App() {
   };
 
   const selectRelative = (offset, autoplay = false, baseId = selectedId(), options = {}) => {
-    const nextSong = pickRelativeSong(offset, baseId, { respectRandom: autoplay });
+    const nextSong = pickRelativeSong(offset, baseId, {
+      respectRandom: autoplay,
+      usePlaybackContext: autoplay || options.usePlaybackContext,
+    });
     if (!nextSong) {
       return;
     }
     if (autoplay) {
-      loadSong(nextSong, true, options);
+      loadSong(nextSong, true, { ...options, preservePlaybackContext: true });
       return;
     }
     setSelectedId(nextSong.id);
@@ -5092,41 +5136,79 @@ function App() {
                       </button>
                     </div>
 
-                    <Show when={playlists().length > 3}>
-                      <div class="mt-3">
-                        <input
-                          value={playlistSearchQuery()}
-                          onInput={(event) => setPlaylistSearchQuery(event.currentTarget.value)}
-                          placeholder="Search"
-                          class="w-full border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
-                        />
-                      </div>
-                    </Show>
+                    <div class="mt-4 flex gap-2 overflow-x-auto font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--soft)]">
+                      <button
+                        type="button"
+                        onClick={() => setPlaylistBrowseSection("global")}
+                        class={`shrink-0 rounded-full border px-3 py-2 transition ${playlistBrowseSection() === "global" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)]" : "border-[var(--line)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}
+                      >
+                        Global {globalPlaylists().length ? `(${globalPlaylists().length})` : ""}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPlaylistBrowseSection("yours")}
+                        class={`shrink-0 rounded-full border px-3 py-2 transition ${playlistBrowseSection() === "yours" ? "border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)]" : "border-[var(--line)] hover:border-[var(--fg)] hover:text-[var(--fg)]"}`}
+                      >
+                        Yours {playlists().length ? `(${playlists().length})` : ""}
+                      </button>
+                    </div>
+
+                    <div class="mt-3">
+                      <input
+                        value={playlistSearchQuery()}
+                        onInput={(event) => setPlaylistSearchQuery(event.currentTarget.value)}
+                        placeholder="Search playlists"
+                        class="w-full border border-[var(--line)] bg-transparent px-3 py-2 font-mono text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted)]"
+                      />
+                    </div>
 
                     <div class="mt-4 space-y-1">
-                      <For each={filteredUserPlaylists()}>
-                        {(playlist) => (
-                          <button
-                            type="button"
-                            onClick={() => void openGlobalPlaylist(playlist.id)}
-                            class={`flex w-full items-center justify-between gap-2 border px-3 py-3 text-left transition ${
-                              myPlaylistDetail()?.id === playlist.id
-                                ? "border-[var(--fg)] bg-[var(--hover)]"
-                                : "border-[var(--line)] hover:border-[var(--fg)]"
-                            }`}
-                          >
-                            <span class="min-w-0 truncate text-sm">{playlist.name}</span>
-                            <span class="shrink-0 font-mono text-[10px] text-[var(--soft)]">{playlist.trackCount}</span>
-                          </button>
-                        )}
-                      </For>
-
-                      <Show when={normalizedPlaylistSearch() && filteredUserPlaylists().length === 0}>
-                        <div class="px-1 py-3 text-sm text-[var(--soft)]">No match.</div>
+                      <Show when={playlistBrowseSection() === "global"}>
+                        <For each={filteredGlobalPlaylists()}>
+                          {(playlist) => (
+                            <button
+                              type="button"
+                              onClick={() => void openGlobalPlaylist(playlist.id)}
+                              class={`flex w-full items-center justify-between gap-2 border px-3 py-3 text-left transition ${
+                                selectedPlaylistDetail()?.id === playlist.id
+                                  ? "border-[var(--fg)] bg-[var(--hover)]"
+                                  : "border-[var(--line)] hover:border-[var(--fg)]"
+                              }`}
+                            >
+                              <span class="min-w-0 truncate text-sm">{playlist.name}</span>
+                              <span class="shrink-0 font-mono text-[10px] text-[var(--soft)]">{playlist.trackCount}</span>
+                            </button>
+                          )}
+                        </For>
+                        <Show when={filteredGlobalPlaylists().length === 0}>
+                          <div class="px-1 py-3 text-sm text-[var(--soft)]">
+                            {normalizedPlaylistSearch() ? "No global playlists match." : "Global playlists are still loading."}
+                          </div>
+                        </Show>
                       </Show>
 
-                      <Show when={!normalizedPlaylistSearch() && playlists().length === 0}>
-                        <div class="px-1 py-3 text-sm text-[var(--soft)]">No playlists yet.</div>
+                      <Show when={playlistBrowseSection() === "yours"}>
+                        <For each={filteredUserPlaylists()}>
+                          {(playlist) => (
+                            <button
+                              type="button"
+                              onClick={() => void openGlobalPlaylist(playlist.id)}
+                              class={`flex w-full items-center justify-between gap-2 border px-3 py-3 text-left transition ${
+                                myPlaylistDetail()?.id === playlist.id
+                                  ? "border-[var(--fg)] bg-[var(--hover)]"
+                                  : "border-[var(--line)] hover:border-[var(--fg)]"
+                              }`}
+                            >
+                              <span class="min-w-0 truncate text-sm">{playlist.name}</span>
+                              <span class="shrink-0 font-mono text-[10px] text-[var(--soft)]">{playlist.trackCount}</span>
+                            </button>
+                          )}
+                        </For>
+                        <Show when={filteredUserPlaylists().length === 0}>
+                          <div class="px-1 py-3 text-sm text-[var(--soft)]">
+                            {normalizedPlaylistSearch() ? "No personal playlists match." : "Create a personal playlist when needed."}
+                          </div>
+                        </Show>
                       </Show>
                     </div>
                   </aside>
@@ -6759,17 +6841,22 @@ function App() {
                   applyRadioStation(selectedRadioStationId() || radioStations()[0]?.id || "", true);
                   return;
                 }
-                const queuedSong = takeNextQueuedSong();
-                if (queuedSong) {
-                  loadSong(queuedSong, true, { allowCrossfade: true });
+                const queued = takeNextQueuedSong();
+                if (queued?.song) {
+                  loadSong(queued.song, true, {
+                    allowCrossfade: true,
+                    playbackContextSource: "queue",
+                    playbackContextIds: queuePlaybackContextIds(queued.contextIds),
+                  });
                   return;
                 }
                 if (repeatMode() === "album" || repeatMode() === "random") {
                   selectRelative(1, true, currentTrackId() || selectedId(), { allowCrossfade: true });
                   return;
                 }
-                const current = sortedActiveSongList().findIndex((song) => song.id === (currentTrackId() || selectedId()));
-                if (current >= 0 && current < sortedActiveSongList().length - 1) {
+                const activeContextSongs = playbackContextSongs().length ? playbackContextSongs() : sortedActiveSongList();
+                const current = activeContextSongs.findIndex((song) => song.id === (currentTrackId() || selectedId()));
+                if (current >= 0 && current < activeContextSongs.length - 1) {
                   selectRelative(1, true, currentTrackId() || selectedId(), { allowCrossfade: true });
                 } else {
                   setIsPlaying(false);
