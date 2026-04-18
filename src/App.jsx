@@ -4081,7 +4081,7 @@ function App() {
         </div>
       </Show>
       <Show when={loading() && !songs().length}>
-        <div class="absolute inset-0 z-[70] flex items-center justify-center bg-[var(--bg)] px-8 text-center sm:hidden">
+        <div class="absolute inset-0 z-[70] flex items-center justify-center bg-[var(--bg)] px-8 text-center">
           <div>
             <div class="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--brand)]">isaibox</div>
             <div class="mt-4 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--soft)]">
