@@ -509,7 +509,7 @@ function App() {
   const activeTheme = createMemo(() => (themePreference() === "system" ? systemTheme() : themePreference()));
   const [recentIds, setRecentIds] = createSignal([]);
   const [playQueue, setPlayQueue] = createSignal([]);
-  const [playbackContext, setPlaybackContext] = createSignal({ source: "library", songIds: [] });
+  const [playbackContext, setPlaybackContext] = createSignal({ source: "library", songIds: [], songs: [] });
   const [radioQueue, setRadioQueue] = createSignal([]);
   const [radioStations, setRadioStations] = createSignal([]);
   const [selectedRadioStationId, setSelectedRadioStationId] = createSignal("");
@@ -1293,7 +1293,30 @@ function App() {
       null
     );
   });
-  const playbackContextSongs = createMemo(() => playbackContext().songIds.map((id) => songIndex().get(id)).filter(Boolean));
+  const playbackContextSongs = createMemo(() => {
+    const context = playbackContext();
+    const contextSongs = Array.isArray(context.songs) ? context.songs.filter((song) => song?.id) : [];
+    const byId = songIndex();
+    const merged = [];
+    const seen = new Set();
+    for (const song of contextSongs) {
+      if (!seen.has(song.id)) {
+        merged.push({ ...(byId.get(song.id) || {}), ...song });
+        seen.add(song.id);
+      }
+    }
+    for (const id of context.songIds || []) {
+      if (!id || seen.has(id)) {
+        continue;
+      }
+      const song = byId.get(id);
+      if (song) {
+        merged.push(song);
+        seen.add(id);
+      }
+    }
+    return merged;
+  });
   const selectedActiveSong = createMemo(() => sortedActiveSongList().find((song) => song.id === selectedId()) || null);
   const selectedIndex = createMemo(() => sortedActiveSongList().findIndex((song) => song.id === selectedId()));
   const favoriteIdSet = createMemo(() => new Set(favoriteIds()));
@@ -3072,9 +3095,11 @@ function App() {
     if (!song?.id || options.preservePlaybackContext) {
       return;
     }
+    const providedSongs = Array.isArray(options.playbackContextSongs) ? options.playbackContextSongs.filter((item) => item?.id) : [];
+    const visibleSongs = sortedActiveSongList().filter((item) => item?.id);
     const providedIds = Array.isArray(options.playbackContextIds) ? options.playbackContextIds : [];
-    const visibleIds = sortedActiveSongList().map((item) => item.id).filter(Boolean);
-    const sourceIds = providedIds.length ? providedIds : visibleIds;
+    const sourceSongs = providedSongs.length ? providedSongs : visibleSongs;
+    const sourceIds = providedIds.length ? providedIds : sourceSongs.map((item) => item.id);
     const nextIds = [];
     for (const id of sourceIds) {
       if (id && !nextIds.includes(id)) {
@@ -3084,9 +3109,18 @@ function App() {
     if (!nextIds.includes(song.id)) {
       nextIds.unshift(song.id);
     }
+    const nextSongs = [];
+    const seenSongs = new Set();
+    for (const item of [song, ...sourceSongs]) {
+      if (item?.id && !seenSongs.has(item.id)) {
+        nextSongs.push(item);
+        seenSongs.add(item.id);
+      }
+    }
     setPlaybackContext({
       source: options.playbackContextSource || mainTab(),
       songIds: nextIds,
+      songs: nextSongs,
     });
   };
 

@@ -137,30 +137,95 @@ def build_library_groups(songs):
     }
 
 
+def search_tokens(value: str) -> list[str]:
+    return [
+        token
+        for token in re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).split()
+        if token
+    ]
+
+
+def score_search_song(song: dict, tokens: list[str], phrase: str) -> int:
+    fields = {
+        "track": search_tokens(song.get("track", "")),
+        "movie": search_tokens(song.get("movie", "")),
+        "musicDirector": search_tokens(song.get("musicDirector", "")),
+        "singers": search_tokens(song.get("singers", "")),
+        "year": search_tokens(song.get("year", "")),
+    }
+    joined = {
+        key: " ".join(value)
+        for key, value in fields.items()
+    }
+    score = 0
+    matched = 0
+    weights = {
+        "track": (120, 80, 50),
+        "movie": (90, 60, 40),
+        "musicDirector": (70, 45, 30),
+        "singers": (55, 35, 24),
+        "year": (25, 20, 15),
+    }
+    for token in tokens:
+        token_score = 0
+        for key, text in joined.items():
+            exact, prefix, contains = weights[key]
+            if text == token:
+                token_score = max(token_score, exact)
+            elif text.startswith(token):
+                token_score = max(token_score, prefix)
+            elif token in text:
+                token_score = max(token_score, contains)
+            else:
+                for field_token in fields[key]:
+                    if field_token.startswith(token):
+                        token_score = max(token_score, max(12, prefix // 2))
+                        break
+        if token_score:
+            matched += 1
+            score += token_score
+    if not matched:
+        return -1
+    if matched == len(tokens):
+        score += 50
+    if phrase and phrase in joined["track"]:
+        score += 70
+    if phrase and phrase in joined["movie"]:
+        score += 35
+    return score
+
+
 @app.get("/api/search")
 def search_library():
-    query = (request.args.get("q") or "").strip().lower()
+    query = (request.args.get("q") or "").strip()
     limit_raw = request.args.get("limit", 240)
     try:
         limit = max(1, min(500, int(limit_raw)))
     except (TypeError, ValueError):
         limit = 240
 
+    tokens = search_tokens(query)
     params = []
     where_query = ""
-    if query:
-        needle = f"%{query}%"
-        where_query = """
-          AND (
-            lower(coalesce(track_name, '')) LIKE ?
-            OR lower(coalesce(movie_name, '')) LIKE ?
-            OR lower(coalesce(singers, '')) LIKE ?
-            OR lower(coalesce(music_director, '')) LIKE ?
-            OR lower(coalesce(year, '')) LIKE ?
-          )
-        """
-        params.extend([needle, needle, needle, needle, needle])
-    params.append(limit)
+    if tokens:
+        token_clauses = []
+        for token in tokens[:5]:
+            needle = f"%{token}%"
+            token_clauses.append(
+                """
+                (
+                  lower(coalesce(track_name, '')) LIKE ?
+                  OR lower(coalesce(movie_name, '')) LIKE ?
+                  OR lower(coalesce(singers, '')) LIKE ?
+                  OR lower(coalesce(music_director, '')) LIKE ?
+                  OR lower(coalesce(year, '')) LIKE ?
+                )
+                """
+            )
+            params.extend([needle, needle, needle, needle, needle])
+        where_query = f"AND ({' OR '.join(token_clauses)})"
+    candidate_limit = max(800, min(2500, limit * 8))
+    params.append(candidate_limit)
 
     with get_read_conn() as conn:
         rows = conn.execute(
@@ -190,6 +255,21 @@ def search_library():
         serialize_song_row(row)
         for row in rows
     ]
+    if tokens:
+        phrase = " ".join(tokens)
+        songs = [
+            item
+            for item in sorted(
+                (
+                    {**song, "_score": score_search_song(song, tokens, phrase)}
+                    for song in songs
+                ),
+                key=lambda song: (-song["_score"], song.get("track", "")),
+            )
+            if item["_score"] >= 0
+        ]
+        for song in songs:
+            song.pop("_score", None)
     groups = build_library_groups(songs)
     return json_response({
         "songs": songs[:200],
