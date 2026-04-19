@@ -2699,6 +2699,13 @@ function App() {
     setSearchTab("songs");
     setSelectedGlobalPlaylistTarget(playlistId);
     setPlaylistDetailError("");
+    if (globalPlaylistDetail()?.id !== playlistId) {
+      setGlobalPlaylistDetail(null);
+      setGlobalPlaylistNameEdit("");
+    }
+    if (isCompactLayout()) {
+      setShowMobilePlaylistPicker(false);
+    }
 
     const playlistSummary = playlistSummaryById().get(playlistId);
     const cachedPlaylist = playlistDetailCache().get(playlistId);
