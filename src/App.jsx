@@ -510,6 +510,7 @@ function App() {
   const [recentIds, setRecentIds] = createSignal([]);
   const [playQueue, setPlayQueue] = createSignal([]);
   const [playbackContext, setPlaybackContext] = createSignal({ source: "library", songIds: [], songs: [] });
+  const [playbackHistory, setPlaybackHistory] = createSignal([]);
   const [radioQueue, setRadioQueue] = createSignal([]);
   const [radioStations, setRadioStations] = createSignal([]);
   const [selectedRadioStationId, setSelectedRadioStationId] = createSignal("");
@@ -3126,11 +3127,15 @@ function App() {
     }
     const nextSongs = [];
     const seenSongs = new Set();
-    for (const item of [song, ...sourceSongs]) {
+    for (const item of sourceSongs) {
       if (item?.id && !seenSongs.has(item.id)) {
         nextSongs.push(item);
         seenSongs.add(item.id);
       }
+    }
+    if (!seenSongs.has(song.id)) {
+      nextSongs.unshift(song);
+      seenSongs.add(song.id);
     }
     setPlaybackContext({
       source: options.playbackContextSource || mainTab(),
@@ -3154,6 +3159,9 @@ function App() {
     setCurrentTrackId(song.id);
     setPlaybackContextForSong(song, options);
     rememberRecentSong(song.id);
+    if (!options.fromHistory && previousTrackId && previousTrackId !== song.id) {
+      setPlaybackHistory((current) => [...current, previousTrackId].slice(-100));
+    }
     prefetchSongIds(getSongNeighborhoodIds(song));
 
     const version = encodeURIComponent(song.updatedAt || song.id);
@@ -3404,6 +3412,28 @@ function App() {
     return false;
   };
 
+  const playPreviousSong = (options = {}) => {
+    if (radioPlaybackLocked()) {
+      selectRelative(-1, true, currentTrackId() || selectedId(), options);
+      return;
+    }
+    if (repeatMode() === "random") {
+      const history = playbackHistory();
+      if (history.length > 0) {
+        const prevId = history[history.length - 1];
+        const prevSong = songIndex().get(prevId)
+          || playbackContextSongs().find((song) => song.id === prevId)
+          || sortedActiveSongList().find((song) => song.id === prevId);
+        if (prevSong) {
+          setPlaybackHistory((current) => current.slice(0, -1));
+          loadSong(prevSong, true, { ...options, preservePlaybackContext: true, fromHistory: true });
+          return;
+        }
+      }
+    }
+    selectRelative(-1, true, currentTrackId() || selectedId(), options);
+  };
+
   const moveSelection = (offset) => {
     const nextSong = pickRelativeSong(offset, selectedId(), { respectRandom: false });
     if (!nextSong) {
@@ -3428,8 +3458,12 @@ function App() {
 
     if (respectRandom && repeatMode() === "random") {
       const base = list.find((song) => song.id === baseId);
-      const pool = list.filter((song) => song.id !== base?.id);
-      return pool[Math.floor(Math.random() * pool.length)] || list[0];
+      const avoidCount = Math.min(playbackHistory().length, Math.max(0, Math.floor(list.length / 2) - 1));
+      const recentSet = new Set(playbackHistory().slice(-avoidCount));
+      const pool = list.filter((song) => song.id !== base?.id && !recentSet.has(song.id));
+      const fallback = list.filter((song) => song.id !== base?.id);
+      const source = pool.length ? pool : fallback;
+      return source[Math.floor(Math.random() * source.length)] || list[0];
     }
 
     const current = list.findIndex((song) => song.id === baseId);
@@ -3733,7 +3767,7 @@ function App() {
       if (event.key === "[") {
         event.preventDefault();
         if (!radioPlaybackLocked()) {
-          selectRelative(-1, true, currentTrackId() || selectedId(), { forceImmediate: true });
+          playPreviousSong({ forceImmediate: true });
         }
         return;
       }
@@ -3925,7 +3959,7 @@ function App() {
       });
       mediaSession.setActionHandler("previoustrack", () => {
         if (!radioPlaybackLocked()) {
-          selectRelative(-1, true, currentTrackId() || selectedId(), { allowCrossfade: false });
+          playPreviousSong({ allowCrossfade: false });
         }
       });
       mediaSession.setActionHandler("nexttrack", () => {
@@ -6569,7 +6603,7 @@ function App() {
               <div class="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => void selectRelative(-1, true, currentTrackId() || selectedId(), { forceImmediate: true })}
+                  onClick={() => void playPreviousSong({ forceImmediate: true })}
                   disabled={radioPlaybackLocked()}
                   aria-label="Previous"
                   class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] disabled:opacity-40"
@@ -6721,7 +6755,7 @@ function App() {
             </Show>
           </div>
           <div class="flex items-center justify-center gap-5">
-            <IconButton disabled={radioPlaybackLocked()} onClick={() => selectRelative(-1, true, currentTrackId() || selectedId(), { forceImmediate: true })} label="Previous">
+            <IconButton disabled={radioPlaybackLocked()} onClick={() => playPreviousSong({ forceImmediate: true })} label="Previous">
               <PrevIcon />
             </IconButton>
             <button
@@ -6867,7 +6901,7 @@ function App() {
               <div class="mt-6 flex items-center justify-center gap-4">
                 <button
                   type="button"
-                  onClick={() => selectRelative(-1, true, currentTrackId() || selectedId(), { forceImmediate: true })}
+                  onClick={() => playPreviousSong({ forceImmediate: true })}
                   disabled={radioPlaybackLocked()}
                   aria-label="Previous"
                   class="flex h-12 w-12 items-center justify-center rounded-full border border-[var(--line)] text-[var(--soft)] disabled:opacity-40"
