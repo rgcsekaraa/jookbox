@@ -511,6 +511,7 @@ function App() {
   const [playQueue, setPlayQueue] = createSignal([]);
   const [playbackContext, setPlaybackContext] = createSignal({ source: "library", songIds: [], songs: [] });
   const [playbackHistory, setPlaybackHistory] = createSignal([]);
+  const [albumLoading, setAlbumLoading] = createSignal(false);
   const [radioQueue, setRadioQueue] = createSignal([]);
   const [radioStations, setRadioStations] = createSignal([]);
   const [selectedRadioStationId, setSelectedRadioStationId] = createSignal("");
@@ -1441,18 +1442,31 @@ function App() {
       return;
     }
     pushLibraryNavState();
-    const albumSongs = await fetchAlbumSongs(payload);
     setMainTab("library");
     setQuery("");
     setSearchTab("songs");
-    setMovieFilter(albumSongs[0] ? albumIdentity(albumSongs[0]) : nextMovie);
+    setMovieFilter(nextMovie);
     setAlbumFilterMeta({
-      album: String(albumSongs[0]?.movie || payload.album || payload.movie || "").trim(),
-      albumUrl: String(albumSongs[0]?.albumUrl || payload.albumUrl || "").trim(),
-      year: String(albumSongs[0]?.year || payload.year || "").trim(),
+      album: String(payload.album || payload.movie || "").trim(),
+      albumUrl: String(payload.albumUrl || "").trim(),
+      year: String(payload.year || "").trim(),
     });
     setArtistFilter("");
     setMusicDirectorFilter("");
+    setAlbumLoading(true);
+    try {
+      const albumSongs = await fetchAlbumSongs(payload);
+      if (albumSongs[0]) {
+        setMovieFilter(albumIdentity(albumSongs[0]));
+        setAlbumFilterMeta({
+          album: String(albumSongs[0].movie || payload.album || payload.movie || "").trim(),
+          albumUrl: String(albumSongs[0].albumUrl || payload.albumUrl || "").trim(),
+          year: String(albumSongs[0].year || payload.year || "").trim(),
+        });
+      }
+    } finally {
+      setAlbumLoading(false);
+    }
   };
 
   const navigateToMusicDirector = (musicDirector) => {
@@ -6101,7 +6115,7 @@ function App() {
                             <Show when={!error()} fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--soft)]">{error()}</div>}>
                               <Show
                                 when={sortedActiveSongList().length > 0}
-                                fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">No results</div>}
+                                fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">{albumLoading() ? `Loading${loadingDots()}` : "No results"}</div>}
                               >
                                 <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto px-2">
                                   <For each={sortedActiveSongList()}>
@@ -6487,7 +6501,7 @@ function App() {
                   <Show when={!error()} fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--soft)]">{error()}</div>}>
                     <Show
                       when={sortedActiveSongList().length > 0}
-                      fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">{mainTab() === "favorites" ? "No favorite songs yet" : "No results"}</div>}
+                      fallback={<div class="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-[0.25em] text-[var(--muted)]">{albumLoading() ? `Loading${loadingDots()}` : (mainTab() === "favorites" ? "No favorite songs yet" : "No results")}</div>}
                     >
                       <ul ref={listRef} class="min-h-0 flex-1 overflow-y-auto">
                         <For each={sortedActiveSongList()}>
