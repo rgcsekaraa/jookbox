@@ -32,11 +32,11 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.publish_ref || 'main' }}
           fetch-depth: 0
@@ -64,7 +64,7 @@ jobs:
           EOF
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -93,7 +93,7 @@ jobs:
             "${DOWNLOAD_URL}"
 
       - name: Back up current published DB
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: duckdb-backup-${{ github.run_id }}
           path: packages/isaibox-local/app/data/masstamilan.duckdb
