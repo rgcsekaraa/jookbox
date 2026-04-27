@@ -159,7 +159,22 @@ jobs:
 
       - name: Push refreshed library
         if: steps.changes.outputs.changed == 'true'
-        run: git push origin HEAD:${{ github.event.inputs.publish_ref || 'main' }}
+        shell: bash
+        env:
+          PUBLISH_REF: ${{ github.event.inputs.publish_ref || 'main' }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:${PUBLISH_REF}"; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected on attempt ${attempt}; rebasing onto origin/${PUBLISH_REF}."
+            git fetch origin "${PUBLISH_REF}"
+            git rebase "origin/${PUBLISH_REF}"
+            sleep 5
+          done
+          echo "Failed to push after 5 attempts." >&2
+          exit 1
 
       - name: Summarize
         run: |
